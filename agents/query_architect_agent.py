@@ -14,6 +14,7 @@ from .base_agent import BaseAgent, AgentMessage, MessageType, AgentConfig, creat
 from rag.schema_retriever import schema_retriever
 from db.bigquery_client import bq_client
 from langchain.schema import HumanMessage, SystemMessage
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,8 @@ class QueryArchitectAgent(BaseAgent):
                 result = await self._draft_generation(message.content)
             elif task_type == "final_optimization":
                 result = await self._final_optimization(message.content)
+            elif task_type == "execute_with_improvements":
+                result = await self._execute_with_improvements(message.content)
             else:
                 result = await self._optimized_generation(message.content)  # 기본값
             
@@ -483,6 +486,346 @@ class QueryArchitectAgent(BaseAgent):
         
         response = await self.send_llm_request(prompt)
         return self._clean_sql_response(response)
+    
+    async def _execute_with_improvements(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        """SQL 실행 및 실패시 개선방안 즉시 적용"""
+        sql_query = input_data.get("sql_query", "")
+        original_query = input_data.get("original_query", "")
+        
+        logger.info("QueryArchitect: Execute with improvements started")
+        
+        if not sql_query:
+            return {
+                "execution_type": "execute_with_improvements",
+                "success": False,
+                "error": "실행할 SQL 쿼리가 없습니다.",
+                "sql_query": sql_query
+            }
+        
+        start_time = datetime.now()
+        
+        # 1단계: 원본 SQL 실행 시도
+        print(f"🔄 SQL 실행 중...")
+        print(f"📝 SQL: {sql_query}")
+        
+        try:
+            query_result = bq_client.execute_query(sql_query)
+            processing_time = (datetime.now() - start_time).total_seconds()
+            
+            if query_result["success"]:
+                # 성공시 바로 반환
+                print(f"✅ SQL 실행 성공! ({processing_time:.2f}초)")
+                print(f"📊 결과: {query_result['returned_rows']}개 행 반환")
+                
+                return {
+                    "execution_type": "execute_with_improvements",
+                    "success": True,
+                    "sql_query": sql_query,
+                    "query_result": query_result,
+                    "processing_time": processing_time,
+                    "improvements_applied": False
+                }
+            
+            # 2단계: 실패시 개선방안 생성
+            print(f"❌ SQL 실행 실패: {query_result.get('error', 'Unknown error')}")
+            print("🔧 개선방안 생성 중...")
+            
+            improvements = await self._generate_sql_improvements(sql_query, query_result.get('error', ''), original_query)
+            
+            if not improvements:
+                return {
+                    "execution_type": "execute_with_improvements", 
+                    "success": False,
+                    "sql_query": sql_query,
+                    "error": query_result.get('error', ''),
+                    "improvements_generated": False
+                }
+            
+            # 3단계: 개선방안 출력 및 사용자 확인
+            print("\n🛠️ 제안된 개선방안:")
+            for i, improvement in enumerate(improvements, 1):
+                print(f"{i}. {improvement['description']}")
+                if improvement.get('improved_sql'):
+                    print(f"   개선된 SQL: {improvement['improved_sql'][:100]}...")
+            
+            # 4단계: 자동 실행 (가장 신뢰도 높은 개선안)
+            best_improvement = max(improvements, key=lambda x: x.get('confidence', 0))
+            
+            if best_improvement.get('confidence', 0) > 0.7:
+                print(f"\n🚀 신뢰도 높은 개선안을 자동 실행합니다. (신뢰도: {best_improvement['confidence']:.2f})")
+                return await self._execute_improved_sql(best_improvement, start_time)
+            else:
+                # 신뢰도가 낮으면 사용자 확인 요청
+                if await self._ask_user_confirmation_async():
+                    return await self._execute_improved_sql(best_improvement, start_time)
+                else:
+                    print("❌ 사용자가 개선방안 실행을 취소했습니다.")
+                    return {
+                        "execution_type": "execute_with_improvements",
+                        "success": False,
+                        "sql_query": sql_query,
+                        "error": query_result.get('error', ''),
+                        "improvements_generated": True,
+                        "improvements_applied": False,
+                        "user_cancelled": True
+                    }
+            
+        except Exception as e:
+            processing_time = (datetime.now() - start_time).total_seconds()
+            logger.error(f"Execute with improvements failed: {str(e)}")
+            return {
+                "execution_type": "execute_with_improvements",
+                "success": False,
+                "sql_query": sql_query,
+                "error": str(e),
+                "processing_time": processing_time
+            }
+    
+    async def _generate_sql_improvements(self, sql_query: str, error_message: str, original_query: str) -> List[Dict[str, Any]]:
+        """SQL 오류 분석 및 개선방안 생성"""
+        
+        # 스키마 정보 준비
+        schema_context = self._build_schema_context_for_improvement(sql_query)
+        
+        system_prompt = f"""
+        당신은 BigQuery SQL 오류 분석 및 개선 전문가입니다.
+        
+        **분석할 정보:**
+        - 원본 사용자 요청: {original_query}
+        - 실패한 SQL: {sql_query}
+        - 오류 메시지: {error_message}
+        
+        **스키마 정보:**
+        {schema_context}
+        
+        **개선 전략:**
+        1. 컬럼명 오류: 정확한 컬럼명으로 수정 (오류 메시지의 "Did you mean" 활용)
+        2. 데이터 타입 오류: PARSE_TIMESTAMP, CAST 등 적절한 타입 변환
+        3. 테이블명 오류: 올바른 dataset.table 형식으로 수정
+        4. 문법 오류: BigQuery 표준 SQL 문법 준수
+        5. 함수 사용 오류: 올바른 함수 및 파라미터
+        
+        **응답 형식 (JSON):**
+        {{
+            "improvements": [
+                {{
+                    "issue_type": "column_name|data_type|table_name|syntax|function",
+                    "description": "구체적인 문제점과 해결책 설명",
+                    "improved_sql": "완전히 수정된 SQL 쿼리",
+                    "confidence": 0.0-1.0,
+                    "changes_made": ["변경사항1", "변경사항2"]
+                }}
+            ]
+        }}
+        """
+        
+        try:
+            response_content = await self.send_llm_request(system_prompt)
+            
+            # JSON 파싱
+            content = response_content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.startswith("```"):
+                content = content[3:]
+            if content.endswith("```"):
+                content = content[:-3]
+            
+            improvement_data = json.loads(content.strip())
+            improvements = improvement_data.get("improvements", [])
+            
+            # 기본 개선방안 추가 (AI가 놓친 부분 보완)
+            basic_improvements = self._generate_basic_improvements(sql_query, error_message)
+            improvements.extend(basic_improvements)
+            
+            return improvements
+            
+        except Exception as e:
+            logger.error(f"AI improvement generation failed: {str(e)}")
+            # AI 실패시 기본 개선방안만 반환
+            return self._generate_basic_improvements(sql_query, error_message)
+    
+    def _generate_basic_improvements(self, sql_query: str, error_message: str) -> List[Dict[str, Any]]:
+        """기본적인 개선방안 생성 (패턴 기반)"""
+        improvements = []
+        
+        # 1. 컬럼명 오류 처리
+        if "Unrecognized name" in error_message:
+            match = re.search(r"Unrecognized name: (\w+)", error_message)
+            suggestion_match = re.search(r"Did you mean (\w+)?", error_message)
+            
+            if match and suggestion_match:
+                wrong_column = match.group(1)
+                correct_column = suggestion_match.group(1)
+                improved_sql = sql_query.replace(wrong_column, correct_column)
+                
+                improvements.append({
+                    "issue_type": "column_name",
+                    "description": f"컬럼명 '{wrong_column}'을 '{correct_column}'으로 수정",
+                    "improved_sql": improved_sql,
+                    "confidence": 0.95,
+                    "changes_made": [f"{wrong_column} → {correct_column}"]
+                })
+        
+        # 2. 데이터 타입 오류 처리 
+        elif "No matching signature" in error_message and ("TIMESTAMP" in error_message or "STRING" in error_message):
+            if "createdAt" in sql_query:
+                # createdAt 컬럼을 TIMESTAMP로 변환 (ISO 8601 형식)
+                improved_sql = re.sub(
+                    r"(\w+\.)?createdAt(\s*[><=]+\s*)",
+                    r"PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', \1createdAt)\2",
+                    sql_query
+                )
+                
+                improvements.append({
+                    "issue_type": "data_type",
+                    "description": "createdAt 컬럼을 ISO 8601 형식의 PARSE_TIMESTAMP로 변환하여 날짜 비교 가능하도록 수정",
+                    "improved_sql": improved_sql,
+                    "confidence": 0.9,
+                    "changes_made": ["createdAt → PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', createdAt)"]
+                })
+        
+        # 3. 함수 오류 처리
+        elif "CURRENT_DATE" in sql_query and "INTERVAL" in error_message:
+            # CURRENT_DATE() → CURRENT_TIMESTAMP()로 수정
+            improved_sql = sql_query.replace("CURRENT_DATE()", "CURRENT_TIMESTAMP()")
+            
+            improvements.append({
+                "issue_type": "function",
+                "description": "날짜 함수를 CURRENT_TIMESTAMP()로 수정",
+                "improved_sql": improved_sql,
+                "confidence": 0.8,
+                "changes_made": ["CURRENT_DATE() → CURRENT_TIMESTAMP()"]
+            })
+        
+        return improvements
+    
+    def _build_schema_context_for_improvement(self, sql_query: str) -> str:
+        """개선을 위한 스키마 컨텍스트 생성"""
+        try:
+            schema_info = getattr(bq_client, 'schema_info', [])
+            if not schema_info:
+                return "스키마 정보가 없습니다."
+            
+            # SQL에서 언급된 테이블 찾기
+            mentioned_tables = []
+            for table_info in schema_info:
+                # schema_info가 문자열인 경우 처리
+                if isinstance(table_info, str):
+                    continue
+                    
+                table_name = table_info.get("table_name", "") if isinstance(table_info, dict) else ""
+                if table_name and table_name.lower() in sql_query.lower():
+                    mentioned_tables.append(table_info)
+            
+            if not mentioned_tables:
+                return "관련 테이블을 찾을 수 없습니다."
+            
+            context = "관련 테이블 스키마:\n"
+            for table in mentioned_tables[:2]:  # 최대 2개
+                if not isinstance(table, dict):
+                    continue
+                    
+                table_name = table.get("table_name", "")
+                columns = table.get("columns", [])
+                
+                context += f"\n테이블: {table_name}\n"
+                for col in columns[:8]:  # 최대 8개 컬럼
+                    if isinstance(col, dict):
+                        col_name = col.get("column_name", "")
+                        col_type = col.get("data_type", "")
+                        context += f"  - {col_name} ({col_type})\n"
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Schema context building failed: {str(e)}")
+            return "스키마 정보 처리 중 오류가 발생했습니다."
+    
+    async def _ask_user_confirmation_async(self) -> bool:
+        """사용자 확인 (비동기)"""
+        try:
+            print("\n❓ 개선된 쿼리를 실행하시겠습니까?")
+            print("   y/yes - 실행")
+            print("   n/no - 취소")
+            
+            # 실제 프로덕션에서는 적절한 비동기 입력 처리 필요
+            # 현재는 간단한 동기 처리
+            import asyncio
+            
+            def get_input():
+                return input("\n선택하세요 (y/n): ").strip().lower()
+            
+            response = await asyncio.get_event_loop().run_in_executor(None, get_input)
+            return response in ['y', 'yes', '예', '네']
+            
+        except Exception as e:
+            logger.error(f"User confirmation failed: {str(e)}")
+            return False
+    
+    async def _execute_improved_sql(self, improvement: Dict, start_time: datetime) -> Dict[str, Any]:
+        """개선된 SQL 실행"""
+        improved_sql = improvement.get('improved_sql', '')
+        
+        if not improved_sql:
+            return {
+                "execution_type": "execute_with_improvements",
+                "success": False,
+                "error": "개선된 SQL이 없습니다."
+            }
+        
+        print(f"\n🔄 개선된 쿼리 실행 중...")
+        print(f"📝 개선된 SQL: {improved_sql}")
+        print(f"🛠️ 적용된 개선사항: {improvement.get('description', '')}")
+        
+        try:
+            query_result = bq_client.execute_query(improved_sql)
+            processing_time = (datetime.now() - start_time).total_seconds()
+            
+            if query_result["success"]:
+                print(f"✅ 개선된 쿼리 실행 성공! ({processing_time:.2f}초)")
+                print(f"📊 결과: {query_result['returned_rows']}개 행 반환")
+                
+                # 성공 통계 업데이트
+                self.performance_stats["optimization_applied"] += 1
+                
+                return {
+                    "execution_type": "execute_with_improvements",
+                    "success": True,
+                    "sql_query": improved_sql,
+                    "original_sql": improvement.get('original_sql', ''),
+                    "query_result": query_result,
+                    "processing_time": processing_time,
+                    "improvements_applied": True,
+                    "improvement_details": {
+                        "type": improvement.get('issue_type', ''),
+                        "description": improvement.get('description', ''),
+                        "confidence": improvement.get('confidence', 0),
+                        "changes_made": improvement.get('changes_made', [])
+                    }
+                }
+            else:
+                print(f"❌ 개선된 쿼리도 실행 실패: {query_result.get('error', '')}")
+                return {
+                    "execution_type": "execute_with_improvements",
+                    "success": False,
+                    "sql_query": improved_sql,
+                    "error": query_result.get('error', ''),
+                    "processing_time": processing_time,
+                    "improvements_applied": True,
+                    "improvement_failed": True
+                }
+                
+        except Exception as e:
+            processing_time = (datetime.now() - start_time).total_seconds()
+            logger.error(f"Improved SQL execution failed: {str(e)}")
+            return {
+                "execution_type": "execute_with_improvements",
+                "success": False,
+                "sql_query": improved_sql,
+                "error": str(e),
+                "processing_time": processing_time
+            }
     
     def _update_generation_stats(self, processing_time: float):
         """생성 통계 업데이트"""
