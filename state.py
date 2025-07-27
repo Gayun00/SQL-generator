@@ -1,8 +1,10 @@
-from typing import TypedDict, Optional, List
+from typing import TypedDict, Optional, List, Dict
 
-class ScheduleState(TypedDict):
+class SQLGeneratorState(TypedDict):
     userInput: str
     isValid: bool
     reason: Optional[str]
-    plan: Optional[List[str]]
+    schemaInfo: Optional[Dict]
+    sqlQuery: Optional[str]
+    explanation: Optional[str]
     finalOutput: Optional[str]

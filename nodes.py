@@ -1,7 +1,8 @@
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
-from state import ScheduleState
+from state import SQLGeneratorState
 from config import LLM_CONFIG
+from bigquery_client import bq_client
 import asyncio
 
 llm = ChatOpenAI(
@@ -10,23 +11,24 @@ llm = ChatOpenAI(
     max_tokens=LLM_CONFIG["max_tokens"]
 )
 
-async def clarifier(state: ScheduleState) -> ScheduleState:
-    """사용자 입력이 유효한 일정 요청인지 판단"""
+async def clarifier(state: SQLGeneratorState) -> SQLGeneratorState:
+    """사용자 입력이 유효한 SQL 쿼리 요청인지 판단"""
     print("🔍 Clarifier 노드 호출됨 - 사용자 입력 검증 중...")
     
     system_prompt = """
-    사용자의 입력이 하루 일정 생성을 위한 유효한 요청인지 판단하세요.
+    사용자의 입력이 SQL 쿼리 생성을 위한 유효한 요청인지 판단하세요.
     유효한 경우 'valid'를, 불명확하거나 부족한 경우 'invalid'를 반환하고 이유를 설명하세요.
     
     유효한 예시:
-    - "내일 회사 일정 짜줘"
-    - "오늘 운동과 공부를 포함한 일정 만들어줘"
-    - "주말에 휴식과 취미활동이 포함된 스케줄 작성해줘"
+    - "사용자별 주문 횟수를 조회해줘"
+    - "지난달 매출 합계를 구하는 쿼리 만들어줘"
+    - "상품별 재고량이 10개 미만인 데이터를 찾아줘"
+    - "월별 신규 가입자 수 추이를 보여줘"
     
     무효한 예시:
     - "안녕하세요"
     - "날씨가 어때?"
-    - 너무 모호하거나 일정과 관련 없는 요청
+    - 너무 모호하거나 데이터 조회와 관련 없는 요청
     
     응답 형식: "결과|이유"
     """
@@ -49,11 +51,11 @@ async def clarifier(state: ScheduleState) -> ScheduleState:
         "reason": reason
     }
 
-async def wait_for_user(state: ScheduleState) -> ScheduleState:
+async def wait_for_user(state: SQLGeneratorState) -> SQLGeneratorState:
     """사용자에게 재입력을 요청"""
     print("⏳ WaitForUser 노드 호출됨 - 사용자 재입력 대기 중...")
     
-    feedback_message = f"❌ 입력이 유효하지 않습니다.\n💡 이유: {state.get('reason', '알 수 없는 오류')}\n✅ 하루 일정 생성을 위한 구체적인 요청을 다시 입력해주세요."
+    feedback_message = f"❌ 입력이 유효하지 않습니다.\n💡 이유: {state.get('reason', '알 수 없는 오류')}\n✅ SQL 쿼리 생성을 위한 구체적인 데이터 조회 요청을 다시 입력해주세요."
     print(f"\n{feedback_message}")
     
     # 사용자에게 재입력 요청
@@ -67,7 +69,7 @@ async def wait_for_user(state: ScheduleState) -> ScheduleState:
                     "userInput": new_input,
                     "isValid": False,
                     "reason": "사용자가 종료를 요청했습니다.",
-                    "finalOutput": "사용자 요청으로 일정 생성을 중단했습니다."
+                    "finalOutput": "사용자 요청으로 SQL 생성을 중단했습니다."
                 }
             
             if not new_input:
