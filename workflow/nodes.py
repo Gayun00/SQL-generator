@@ -100,7 +100,7 @@ async def wait_for_user(state: SQLGeneratorState) -> SQLGeneratorState:
             continue
 
 async def sql_generator(state: SQLGeneratorState) -> SQLGeneratorState:
-    """유효한 요청을 바탕으로 SQL 쿼리 생성 (RAG 기반)"""
+    """유효한 요청을 바탕으로 SQL 쿼리 생성 (RAG 기반 + 탐색 결과 활용)"""
     print("📋 SQLGenerator 노드 호출됨 - SQL 쿼리 생성 중...")
     
     user_query = state['userInput']
@@ -109,11 +109,26 @@ async def sql_generator(state: SQLGeneratorState) -> SQLGeneratorState:
     print("🔍 RAG 기반 관련 스키마 검색 중...")
     relevant_context = schema_retriever.create_context_summary(user_query, max_tables=5)
     
+    # 탐색 결과가 있으면 추가 컨텍스트로 활용
+    exploration_context = ""
+    exploration_results = state.get("explorationResults")
+    if exploration_results and exploration_results.get("insights"):
+        print("💡 탐색 결과를 SQL 생성에 활용 중...")
+        insights = exploration_results.get("insights", [])
+        exploration_context = f"""
+        
+=== 탐색을 통해 발견된 정보 ===
+{chr(10).join([f"- {insight}" for insight in insights])}
+
+이 정보를 바탕으로 더 정확한 SQL 쿼리를 생성하세요.
+        """
+    
     system_prompt = f"""
     사용자의 요청을 분석하여 BigQuery SQL 쿼리를 생성하세요.
     
     다음 관련 스키마 정보를 참고하세요:
     {relevant_context}
+    {exploration_context}
     
     주의사항:
     - BigQuery 문법을 사용하세요
@@ -123,6 +138,7 @@ async def sql_generator(state: SQLGeneratorState) -> SQLGeneratorState:
     - LIMIT을 사용하여 결과를 제한하세요 (기본 100)
     - JOIN이 필요한 경우 적절한 JOIN 조건을 사용하세요
     - 집계 함수나 윈도우 함수가 필요한 경우 적절히 활용하세요
+    - 탐색 결과에서 발견된 정보를 정확히 반영하세요
     
     SQL 쿼리만 반환하세요. 설명이나 다른 텍스트는 포함하지 마세요.
     """
@@ -321,6 +337,16 @@ async def orchestrator(state: SQLGeneratorState) -> str:
         print("➡️ 다음 노드: WaitForUser (입력이 유효하지 않음)")
         return "wait_for_user"
     
+    # 불확실성 분석이 없음 → SQLAnalyzer  
+    if not state.get("uncertaintyAnalysis"):
+        print("➡️ 다음 노드: SQLAnalyzer (불확실성 분석 필요)")
+        return "sql_analyzer"
+    
+    # 불확실성이 존재하고 탐색 결과가 없음 → SQLExplorer
+    if state.get("hasUncertainty") and not state.get("explorationResults"):
+        print("➡️ 다음 노드: SQLExplorer (탐색 쿼리 실행 필요)")
+        return "sql_explorer"
+    
     # SQL 쿼리가 없음 → SQLGenerator
     if not state.get("sqlQuery"):
         print("➡️ 다음 노드: SQLGenerator (SQL 쿼리 생성 필요)")
@@ -455,6 +481,162 @@ async def sql_analyzer(state: SQLGeneratorState) -> SQLGeneratorState:
             },
             "hasUncertainty": False
         }
+
+async def sql_explorer(state: SQLGeneratorState) -> SQLGeneratorState:
+    """불확실성 해결을 위한 탐색 쿼리 실행"""
+    print("🔍 SQLExplorer 노드 호출됨 - 탐색 쿼리 실행 중...")
+    
+    uncertainty_analysis = state.get("uncertaintyAnalysis", {})
+    uncertainties = uncertainty_analysis.get("uncertainties", [])
+    
+    if not uncertainties:
+        print("⚠️ 실행할 탐색 쿼리가 없습니다.")
+        return {
+            **state,
+            "explorationResults": {
+                "executed_queries": 0,
+                "results": [],
+                "summary": "탐색할 불확실성이 없습니다."
+            }
+        }
+    
+    exploration_results = {
+        "executed_queries": 0,
+        "results": [],
+        "summary": "",
+        "insights": []
+    }
+    
+    print(f"📊 {len(uncertainties)}개의 불확실성에 대한 탐색 쿼리 실행 중...")
+    
+    for i, uncertainty in enumerate(uncertainties, 1):
+        uncertainty_type = uncertainty.get("type", "unknown")
+        description = uncertainty.get("description", "N/A")
+        exploration_query = uncertainty.get("exploration_query", "")
+        
+        print(f"\n🔍 탐색 {i}/{len(uncertainties)}: {uncertainty_type}")
+        print(f"   설명: {description}")
+        
+        if not exploration_query:
+            print(f"   ⚠️ 탐색 쿼리가 제공되지 않았습니다.")
+            continue
+            
+        print(f"   쿼리: {exploration_query}")
+        
+        try:
+            # 탐색 쿼리 실행 (결과를 제한하여 빠른 실행)
+            query_result = bq_client.execute_query(exploration_query, max_results=20)
+            
+            exploration_results["executed_queries"] += 1
+            
+            if query_result["success"]:
+                print(f"   ✅ 탐색 성공: {query_result['returned_rows']}개 결과")
+                
+                # 결과 분석 및 인사이트 생성
+                insight = await analyze_exploration_result(uncertainty, query_result)
+                
+                exploration_results["results"].append({
+                    "uncertainty_type": uncertainty_type,
+                    "description": description,
+                    "query": exploration_query,
+                    "success": True,
+                    "data": query_result["results"][:10],  # 상위 10개만 저장
+                    "total_rows": query_result["total_rows"],
+                    "insight": insight
+                })
+                
+                exploration_results["insights"].append(insight)
+                print(f"   💡 인사이트: {insight}")
+                
+            else:
+                print(f"   ❌ 탐색 실패: {query_result['error']}")
+                exploration_results["results"].append({
+                    "uncertainty_type": uncertainty_type,
+                    "description": description,
+                    "query": exploration_query,
+                    "success": False,
+                    "error": query_result["error"],
+                    "insight": f"탐색 실패로 {uncertainty_type} 불확실성을 해결할 수 없습니다."
+                })
+                
+        except Exception as e:
+            error_msg = f"탐색 쿼리 실행 중 오류: {str(e)}"
+            print(f"   💥 {error_msg}")
+            
+            exploration_results["results"].append({
+                "uncertainty_type": uncertainty_type,
+                "description": description,
+                "query": exploration_query,
+                "success": False,
+                "error": error_msg,
+                "insight": f"오류로 인해 {uncertainty_type} 불확실성을 해결할 수 없습니다."
+            })
+    
+    # 전체 탐색 결과 요약 생성
+    successful_explorations = len([r for r in exploration_results["results"] if r["success"]])
+    total_explorations = len(exploration_results["results"])
+    
+    exploration_results["summary"] = f"{successful_explorations}/{total_explorations}개 탐색 완료"
+    
+    print(f"\n📋 탐색 완료: {exploration_results['summary']}")
+    if exploration_results["insights"]:
+        print("💡 주요 인사이트:")
+        for insight in exploration_results["insights"]:
+            print(f"   - {insight}")
+    
+    return {
+        **state,
+        "explorationResults": exploration_results
+    }
+
+async def analyze_exploration_result(uncertainty: dict, query_result: dict) -> str:
+    """탐색 결과를 분석하여 인사이트 생성"""
+    uncertainty_type = uncertainty.get("type", "unknown")
+    results = query_result.get("results", [])
+    total_rows = query_result.get("total_rows", 0)
+    
+    if not results:
+        return f"{uncertainty_type} 탐색 결과가 비어있습니다."
+    
+    try:
+        if uncertainty_type == "column_values":
+            # 컬럼 값 분석
+            if len(results) == 1 and len(results[0]) == 1:
+                # DISTINCT 값들 조회인 경우
+                column_name = list(results[0].keys())[0]
+                unique_values = [str(row[column_name]) for row in results if row[column_name] is not None]
+                if len(unique_values) <= 5:
+                    return f"가능한 값: {', '.join(unique_values)}"
+                else:
+                    return f"총 {len(unique_values)}개의 고유 값 발견 (예: {', '.join(unique_values[:3])}, ...)"
+            else:
+                return f"컬럼 값 탐색 완료: {total_rows}개 행, 샘플 데이터 확인됨"
+                
+        elif uncertainty_type == "table_relationship":
+            # 테이블 관계 분석
+            if results:
+                sample_keys = list(results[0].keys())
+                return f"연결 키 확인: {', '.join(sample_keys)} ({total_rows}개 관계 발견)"
+            else:
+                return "테이블 간 관계를 확인할 수 없습니다."
+                
+        elif uncertainty_type == "data_range":
+            # 데이터 범위 분석
+            if len(results) >= 1:
+                first_row = results[0]
+                if 'min' in str(first_row).lower() and 'max' in str(first_row).lower():
+                    # MIN/MAX 쿼리 결과인 경우
+                    return f"데이터 범위 확인: {first_row}"
+                else:
+                    return f"데이터 범위 탐색 완료: {total_rows}개 레코드 분석"
+            else:
+                return "데이터 범위를 확인할 수 없습니다."
+        
+        else:
+            return f"{uncertainty_type} 탐색 완료: {total_rows}개 결과"
+            
+    except Exception as e:
+        return f"결과 분석 중 오류: {str(e)}"
 
 async def final_answer(state: SQLGeneratorState) -> SQLGeneratorState:
     """최종 응답 출력"""
