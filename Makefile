@@ -1,6 +1,6 @@
 # SQL Generator - 명령어 단축키
 
-.PHONY: test test-bq test-rag test-sql test-analyzer test-explorer run workflow install clean-cache help
+.PHONY: test test-bq test-rag test-sql test-analyzer test-explorer test-e2e run workflow install clean-cache help
 
 # BigQuery 연결 테스트
 test-bq:
@@ -22,8 +22,12 @@ test-analyzer:
 test-explorer:
 	python3 tests/test_sql_explorer.py
 
-# 전체 시스템 테스트 (BigQuery + RAG + SQL 실행 + 분석기 + 탐색기)
-test: test-bq test-rag test-sql test-analyzer test-explorer
+# 엔드투엔드 통합 테스트
+test-e2e:
+	python3 tests/test_end_to_end.py
+
+# 전체 시스템 테스트 (BigQuery + RAG + SQL 실행 + 분석기 + 탐색기 + E2E)
+test: test-bq test-rag test-sql test-analyzer test-explorer test-e2e
 
 # 메인 프로그램 실행 
 run:
@@ -46,12 +50,13 @@ clean-cache:
 # 도움말
 help:
 	@echo "사용 가능한 명령어:"
-	@echo "  make test        - 전체 시스템 테스트 (BigQuery + RAG + SQL 실행 + 분석기 + 탐색기)"
+	@echo "  make test        - 전체 시스템 테스트 (BigQuery + RAG + SQL 실행 + 분석기 + 탐색기 + E2E)"
 	@echo "  make test-bq     - BigQuery 연결 테스트"
 	@echo "  make test-rag    - RAG 시스템 테스트"
 	@echo "  make test-sql    - SQL 실행 기능 테스트"
 	@echo "  make test-analyzer - SQL 분석기 테스트"
 	@echo "  make test-explorer - SQL 탐색기 테스트"
+	@echo "  make test-e2e    - 엔드투엔드 통합 테스트"
 	@echo "  make run         - 메인 프로그램 실행"
 	@echo "  make workflow    - 워크플로우 직접 실행"
 	@echo "  make install     - 패키지 설치"

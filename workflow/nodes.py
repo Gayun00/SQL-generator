@@ -362,6 +362,19 @@ async def orchestrator(state: SQLGeneratorState) -> str:
         print("➡️ 다음 노드: Explainer (설명 생성 필요)")
         return "explainer"
     
+    # 재질문이 필요한 경우 → SQLClarifier
+    if (state.get("hasUncertainty") and 
+        state.get("explorationResults") and 
+        not state.get("needsClarification") and
+        state.get("clarificationQuestions") is None):
+        print("➡️ 다음 노드: SQLClarifier (재질문 필요성 검토)")
+        return "sql_clarifier"
+    
+    # 재질문이 필요하다고 판단된 경우 → UserClarificationInput
+    if state.get("needsClarification"):
+        print("➡️ 다음 노드: UserClarificationInput (사용자 추가 정보 입력)")
+        return "user_clarification_input"
+    
     # 모든 게 완료되면 → FinalAnswer
     print("➡️ 다음 노드: FinalAnswer (모든 단계 완료)")
     return "final_answer"
@@ -637,6 +650,204 @@ async def analyze_exploration_result(uncertainty: dict, query_result: dict) -> s
             
     except Exception as e:
         return f"결과 분석 중 오류: {str(e)}"
+
+async def sql_clarifier(state: SQLGeneratorState) -> SQLGeneratorState:
+    """해결되지 않은 불확실성에 대해 사용자에게 재질문"""
+    print("❓ SQLClarifier 노드 호출됨 - 사용자 재질문 생성 중...")
+    
+    uncertainty_analysis = state.get("uncertaintyAnalysis", {})
+    exploration_results = state.get("explorationResults", {})
+    user_query = state.get("userInput", "")
+    
+    # 해결되지 않은 불확실성 식별
+    unresolved_uncertainties = []
+    
+    if exploration_results.get("results"):
+        for result in exploration_results["results"]:
+            if not result.get("success") or "결과가 비어있습니다" in result.get("insight", ""):
+                unresolved_uncertainties.append(result)
+    
+    if not unresolved_uncertainties:
+        print("✅ 모든 불확실성이 해결되었습니다.")
+        return {
+            **state,
+            "needsClarification": False,
+            "clarificationQuestions": []
+        }
+    
+    print(f"🔍 {len(unresolved_uncertainties)}개의 해결되지 않은 불확실성 발견")
+    
+    # 사용자 재질문 생성
+    system_prompt = f"""
+    사용자의 SQL 요청에서 해결되지 않은 불확실성이 있습니다.
+    
+    원래 요청: {user_query}
+    
+    해결되지 않은 문제들:
+    {chr(10).join([f"- {u.get('description', 'N/A')}" for u in unresolved_uncertainties])}
+    
+    이 문제들을 해결하기 위해 사용자에게 구체적이고 명확한 질문을 생성하세요.
+    
+    질문 생성 가이드라인:
+    1. 구체적이고 이해하기 쉬운 질문
+    2. 예시를 포함하여 사용자가 쉽게 답할 수 있도록 함
+    3. 한 번에 너무 많은 질문을 하지 말고 가장 중요한 것부터
+    4. 선택지를 제공할 수 있으면 제공
+    
+    응답 형식 (JSON):
+    {{
+        "questions": [
+            {{
+                "question": "구체적인 질문",
+                "context": "질문의 배경 설명",
+                "examples": ["예시1", "예시2"],
+                "uncertainty_type": "column_values|table_relationship|data_range"
+            }}
+        ],
+        "summary": "전체 질문 요약"
+    }}
+    """
+    
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content="해결되지 않은 불확실성에 대한 재질문을 생성해주세요.")
+    ]
+    
+    try:
+        response = await llm.ainvoke(messages)
+        
+        # JSON 파싱 (코드 블록 제거)
+        response_content = response.content.strip()
+        if response_content.startswith("```json"):
+            response_content = response_content[7:]
+        if response_content.startswith("```"):
+            response_content = response_content[3:]
+        if response_content.endswith("```"):
+            response_content = response_content[:-3]
+        
+        response_content = response_content.strip()
+        clarification_data = json.loads(response_content)
+        
+        questions = clarification_data.get("questions", [])
+        summary = clarification_data.get("summary", "추가 정보가 필요합니다.")
+        
+        print(f"📝 생성된 재질문: {len(questions)}개")
+        for i, q in enumerate(questions, 1):
+            print(f"   {i}. {q.get('question', 'N/A')}")
+        
+        return {
+            **state,
+            "needsClarification": True,
+            "clarificationQuestions": questions,
+            "clarificationSummary": summary
+        }
+        
+    except json.JSONDecodeError as e:
+        print(f"⚠️ JSON 파싱 실패: {e}")
+        
+        # 파싱 실패시 기본 질문 생성
+        default_questions = [{
+            "question": f"'{user_query}' 요청을 정확히 처리하기 위해 추가 정보가 필요합니다. 더 구체적으로 설명해주실 수 있나요?",
+            "context": "요청이 불분명하여 추가 설명이 필요합니다.",
+            "examples": [],
+            "uncertainty_type": "general"
+        }]
+        
+        return {
+            **state,
+            "needsClarification": True,
+            "clarificationQuestions": default_questions,
+            "clarificationSummary": "추가 정보가 필요합니다."
+        }
+        
+    except Exception as e:
+        print(f"❌ 재질문 생성 중 오류: {str(e)}")
+        
+        return {
+            **state,
+            "needsClarification": False,
+            "clarificationQuestions": [],
+            "clarificationSummary": "재질문 생성에 실패했습니다."
+        }
+
+async def user_clarification_input(state: SQLGeneratorState) -> SQLGeneratorState:
+    """사용자로부터 추가 정보 입력 받기"""
+    print("💬 UserClarificationInput 노드 호출됨 - 사용자 추가 정보 대기 중...")
+    
+    questions = state.get("clarificationQuestions", [])
+    summary = state.get("clarificationSummary", "추가 정보가 필요합니다.")
+    
+    print(f"\n📋 {summary}")
+    print("=" * 50)
+    
+    user_answers = []
+    
+    for i, question_data in enumerate(questions, 1):
+        question = question_data.get("question", "")
+        context = question_data.get("context", "")
+        examples = question_data.get("examples", [])
+        
+        print(f"\n❓ 질문 {i}: {question}")
+        if context:
+            print(f"💡 배경: {context}")
+        if examples:
+            print(f"📝 예시: {', '.join(examples)}")
+        
+        while True:
+            try:
+                answer = input(f"\n➤ 답변 {i}: ").strip()
+                
+                if answer.lower() in ['quit', 'exit', '종료']:
+                    return {
+                        **state,
+                        "userInput": "quit",
+                        "needsClarification": False,
+                        "finalOutput": "사용자 요청으로 SQL 생성을 중단했습니다."
+                    }
+                
+                if not answer:
+                    print("⚠️ 답변이 비어있습니다. 다시 입력해주세요.")
+                    continue
+                    
+                user_answers.append({
+                    "question": question,
+                    "answer": answer,
+                    "uncertainty_type": question_data.get("uncertainty_type", "general")
+                })
+                break
+                
+            except KeyboardInterrupt:
+                print("\n👋 사용자가 중단을 요청했습니다.")
+                return {
+                    **state,
+                    "userInput": "quit",
+                    "needsClarification": False,
+                    "finalOutput": "사용자 요청으로 SQL 생성을 중단했습니다."
+                }
+    
+    # 원래 요청과 추가 정보를 결합
+    original_query = state.get("userInput", "")
+    
+    enhanced_query = f"{original_query}\n\n추가 정보:\n"
+    for i, answer_data in enumerate(user_answers, 1):
+        enhanced_query += f"{i}. {answer_data['question']}\n   → {answer_data['answer']}\n"
+    
+    print(f"\n✅ 추가 정보 수집 완료!")
+    print(f"🔄 강화된 쿼리로 다시 분석을 시작합니다...")
+    
+    return {
+        **state,
+        "userInput": enhanced_query,
+        "needsClarification": False,
+        "userAnswers": user_answers,
+        # 다시 분석하기 위해 기존 분석 결과 초기화
+        "uncertaintyAnalysis": None,
+        "hasUncertainty": None,
+        "explorationResults": None,
+        "sqlQuery": None,
+        "explanation": None,
+        "finalOutput": None
+    }
 
 async def final_answer(state: SQLGeneratorState) -> SQLGeneratorState:
     """최종 응답 출력"""
