@@ -11,37 +11,22 @@ from rag.schema_embedder import schema_embedder
 from rag.schema_retriever import schema_retriever
 
 async def initialize_system():
-    """시스템 초기화 - BigQuery 연결 및 스키마 정보 수집"""
+    """시스템 초기화 - 캐시 기반 스키마 로딩"""
     print("🚀 SQL Generator 시스템 초기화 중...")
     print("=" * 60)
     
-    # BigQuery 연결
-    print("🔗 BigQuery 연결 시도 중...")
-    if not bq_client.connect():
-        print("❌ BigQuery 연결에 실패했습니다. 시스템을 종료합니다.")
-        return False
-    
-    # 스키마 정보 수집
-    print("\n🔍 스키마 정보 수집 중...")
-    schema_info = bq_client.initialize_schema()
+    # 캐시 기반 스키마 초기화 (BigQuery API 호출 최소화)
+    schema_info = schema_embedder.initialize_with_cache(bq_client)
     
     if not schema_info:
-        print("❌ 스키마 정보 수집에 실패했습니다. 시스템을 종료합니다.")
+        print("❌ 스키마 정보 초기화에 실패했습니다. 시스템을 종료합니다.")
         return False
     
-    # RAG 시스템 초기화
-    print(f"\n🧠 RAG 시스템 초기화 중...")
-    print("   - ChromaDB 벡터스토어 설정...")
-    if not schema_embedder.initialize_vectorstore():
-        print("❌ 벡터스토어 초기화에 실패했습니다. 시스템을 종료합니다.")
-        return False
+    # BigQuery 클라이언트에 스키마 정보 설정 (노드에서 사용할 수 있도록)
+    bq_client.schema_info = schema_info
     
-    print("   - 스키마 정보 임베딩 중...")
-    if not schema_embedder.embed_schemas(schema_info):
-        print("❌ 스키마 임베딩에 실패했습니다. 시스템을 종료합니다.")
-        return False
-    
-    print("   - 스키마 검색기 초기화 중...")
+    # 스키마 검색기 초기화
+    print("\n🔍 스키마 검색기 초기화 중...")
     if not schema_retriever.initialize():
         print("❌ 스키마 검색기 초기화에 실패했습니다. 시스템을 종료합니다.")
         return False
@@ -54,6 +39,8 @@ async def initialize_system():
     rag_stats = schema_retriever.get_statistics()
     if rag_stats.get("status") == "ready":
         print(f"🧠 RAG: {rag_stats.get('document_count', 0)}개 문서가 임베딩됨")
+        if rag_stats.get('cache_last_updated'):
+            print(f"📅 캐시: {rag_stats.get('cache_last_updated', '').split('T')[0]} 업데이트")
     
     print("=" * 60)
     

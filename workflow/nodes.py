@@ -106,19 +106,13 @@ async def sql_generator(state: SQLGeneratorState) -> SQLGeneratorState:
     
     # RAG를 통한 관련 스키마 검색
     print("🔍 RAG 기반 관련 스키마 검색 중...")
-    relevant_context = schema_retriever.create_context_summary(user_query, max_tables=3)
-    
-    # 전체 스키마 정보도 백업으로 준비 (RAG 결과가 부족한 경우)
-    full_schema_summary = bq_client.get_schema_summary()
+    relevant_context = schema_retriever.create_context_summary(user_query, max_tables=5)
     
     system_prompt = f"""
     사용자의 요청을 분석하여 BigQuery SQL 쿼리를 생성하세요.
     
-    우선적으로 다음 관련 스키마 정보를 참고하세요:
+    다음 관련 스키마 정보를 참고하세요:
     {relevant_context}
-    
-    필요시 전체 스키마 정보도 참고할 수 있습니다:
-    {full_schema_summary}
     
     주의사항:
     - BigQuery 문법을 사용하세요
