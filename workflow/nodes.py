@@ -133,34 +133,76 @@ async def sql_generator(state: SQLGeneratorState) -> SQLGeneratorState:
     
     response = await llm.ainvoke(messages)
     
+    # SQL 쿼리 정리 (```sql ... ``` 형태 제거)
+    sql_query = response.content.strip()
+    
+    # 코드 블록 제거
+    if sql_query.startswith("```sql"):
+        sql_query = sql_query[6:]  # ```sql 제거
+    if sql_query.startswith("```"):
+        sql_query = sql_query[3:]   # ``` 제거
+    if sql_query.endswith("```"):
+        sql_query = sql_query[:-3]  # 끝의 ``` 제거
+    
+    sql_query = sql_query.strip()
+    
     return {
         **state,
         "schemaInfo": bq_client.schema_info,
-        "sqlQuery": response.content.strip()
+        "sqlQuery": sql_query
     }
 
 async def explainer(state: SQLGeneratorState) -> SQLGeneratorState:
     """생성된 SQL 쿼리에 대한 설명 생성"""
     print("⚡ Explainer 노드 호출됨 - SQL 쿼리 설명 생성 중...")
     
-    system_prompt = """
-    다음 SQL 쿼리에 대해 사용자가 이해하기 쉬운 설명을 생성해주세요.
-    
-    설명에 포함할 내용:
-    1. 쿼리의 주요 목적
-    2. 사용된 테이블과 컬럼
-    3. 주요 로직 및 조건
-    4. 예상되는 결과 형태
-    
-    친근하고 이해하기 쉬운 톤으로 작성해주세요.
-    """
-    
     sql_query = state.get("sqlQuery", "")
+    query_results = state.get("queryResults", {})
+    execution_status = state.get("executionStatus", "unknown")
     
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=f"SQL 쿼리:\n{sql_query}")
-    ]
+    # 실행 결과에 따라 다른 설명 생성
+    if execution_status == "success" and query_results.get("success"):
+        system_prompt = """
+        다음 SQL 쿼리와 실행 결과에 대해 사용자가 이해하기 쉬운 설명을 생성해주세요.
+        
+        설명에 포함할 내용:
+        1. 쿼리의 주요 목적
+        2. 사용된 테이블과 컬럼
+        3. 주요 로직 및 조건
+        4. 실행 결과 요약 (행 수, 주요 특징 등)
+        
+        친근하고 이해하기 쉬운 톤으로 작성해주세요.
+        """
+        
+        # 실행 결과 요약
+        results_summary = f"""
+실행 결과:
+- 반환된 행 수: {query_results.get('returned_rows', 0)}개
+- 전체 행 수: {query_results.get('total_rows', 0)}개
+- 처리된 데이터: {query_results.get('bytes_processed', 0):,} bytes
+"""
+        
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"SQL 쿼리:\n{sql_query}\n{results_summary}")
+        ]
+    else:
+        system_prompt = """
+        다음 SQL 쿼리에 대해 설명을 생성해주세요. 쿼리 실행에 실패했으므로 쿼리 자체에 대한 설명과 실패 원인에 대한 분석을 포함해주세요.
+        
+        설명에 포함할 내용:
+        1. 쿼리의 의도된 목적
+        2. 사용하려던 테이블과 컬럼
+        3. 실행 실패 원인 분석
+        4. 개선 방안 제안
+        """
+        
+        error_info = f"실행 실패 정보: {query_results.get('error', '알 수 없는 오류')}"
+        
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"SQL 쿼리:\n{sql_query}\n\n{error_info}")
+        ]
     
     response = await llm.ainvoke(messages)
     
@@ -171,6 +213,32 @@ async def explainer(state: SQLGeneratorState) -> SQLGeneratorState:
 {sql_query}
 ```
 
+=== 실행 결과 ===
+"""
+    
+    if execution_status == "success" and query_results.get("success"):
+        final_output += f"""✅ 쿼리 실행 성공!
+📊 반환된 결과: {query_results.get('returned_rows', 0)}개 행
+📈 전체 데이터: {query_results.get('total_rows', 0)}개 행
+💾 처리된 데이터: {query_results.get('bytes_processed', 0):,} bytes
+
+=== 결과 데이터 (상위 5개) ===
+"""
+        # 상위 5개 결과 표시
+        results = query_results.get('results', [])
+        for i, row in enumerate(results[:5]):
+            final_output += f"\n{i+1}. {row}"
+        
+        if len(results) > 5:
+            final_output += f"\n... (총 {len(results)}개 중 5개만 표시)"
+    else:
+        final_output += f"""❌ 쿼리 실행 실패
+오류: {query_results.get('error', '알 수 없는 오류')}
+제안: {query_results.get('suggestion', '쿼리를 다시 확인해보세요.')}
+"""
+    
+    final_output += f"""
+
 === 쿼리 설명 ===
 {response.content}"""
     
@@ -179,6 +247,54 @@ async def explainer(state: SQLGeneratorState) -> SQLGeneratorState:
         "explanation": response.content,
         "finalOutput": final_output
     }
+
+async def sql_executor(state: SQLGeneratorState) -> SQLGeneratorState:
+    """생성된 SQL 쿼리를 실제 BigQuery에서 실행"""
+    print("⚡ SQLExecutor 노드 호출됨 - SQL 쿼리 실행 중...")
+    
+    sql_query = state.get("sqlQuery", "")
+    if not sql_query:
+        return {
+            **state,
+            "executionStatus": "failed",
+            "queryResults": {
+                "success": False,
+                "error": "실행할 SQL 쿼리가 없습니다.",
+                "results": []
+            }
+        }
+    
+    try:
+        # BigQuery에서 SQL 실행
+        print(f"🔍 실행할 쿼리:\n{sql_query}")
+        results = bq_client.execute_query(sql_query, max_results=50)
+        
+        if results["success"]:
+            print(f"✅ 쿼리 실행 성공! {results['returned_rows']}개 결과 반환")
+            execution_status = "success"
+        else:
+            print(f"❌ 쿼리 실행 실패: {results['error']}")
+            execution_status = "failed"
+        
+        return {
+            **state,
+            "executionStatus": execution_status,
+            "queryResults": results
+        }
+        
+    except Exception as e:
+        error_msg = f"쿼리 실행 중 예상치 못한 오류: {str(e)}"
+        print(f"❌ {error_msg}")
+        
+        return {
+            **state,
+            "executionStatus": "failed",
+            "queryResults": {
+                "success": False,
+                "error": error_msg,
+                "results": []
+            }
+        }
 
 async def orchestrator(state: SQLGeneratorState) -> str:
     """현재 상태에 따라 다음 노드를 결정"""
@@ -204,15 +320,20 @@ async def orchestrator(state: SQLGeneratorState) -> str:
         print("➡️ 다음 노드: WaitForUser (입력이 유효하지 않음)")
         return "wait_for_user"
     
-    # plan이 없음 → Planner
-    if not state.get("plan"):
-        print("➡️ 다음 노드: Planner (일정 계획 필요)")
-        return "planner"
+    # SQL 쿼리가 없음 → SQLGenerator
+    if not state.get("sqlQuery"):
+        print("➡️ 다음 노드: SQLGenerator (SQL 쿼리 생성 필요)")
+        return "sql_generator"
     
-    # finalOutput이 없음 → Executor
-    if not state.get("finalOutput"):
-        print("➡️ 다음 노드: Executor (최종 요약 필요)")
-        return "executor"
+    # SQL 실행 결과가 없음 → SQLExecutor  
+    if not state.get("queryResults"):
+        print("➡️ 다음 노드: SQLExecutor (SQL 실행 필요)")
+        return "sql_executor"
+    
+    # 설명이 없음 → Explainer
+    if not state.get("explanation"):
+        print("➡️ 다음 노드: Explainer (설명 생성 필요)")
+        return "explainer"
     
     # 모든 게 완료되면 → FinalAnswer
     print("➡️ 다음 노드: FinalAnswer (모든 단계 완료)")

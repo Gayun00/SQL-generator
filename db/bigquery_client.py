@@ -226,6 +226,112 @@ class BigQueryClient:
             summary.append("")
         
         return "\n".join(summary)
+    
+    def execute_query(self, query: str, max_results: int = 100) -> Dict:
+        """SQL 쿼리 실행 및 결과 반환"""
+        if not self.client:
+            return {
+                "success": False,
+                "error": "BigQuery 클라이언트가 연결되지 않았습니다.",
+                "results": []
+            }
+        
+        try:
+            print(f"🔍 쿼리 실행 중...")
+            print(f"📋 Query: {query}")
+            
+            # 쿼리 실행
+            query_job = self.client.query(query)
+            
+            # 쿼리 완료 대기
+            query_result = query_job.result()
+            
+            # 결과 가져오기 (최대 결과 수 제한)
+            results = []
+            row_count = 0
+            
+            for row in query_result:
+                if row_count >= max_results:
+                    break
+                    
+                # Row를 딕셔너리로 변환
+                row_dict = {}
+                for key, value in row.items():
+                    # BigQuery 특수 타입들을 Python 기본 타입으로 변환
+                    if hasattr(value, 'isoformat'):  # datetime 객체
+                        row_dict[key] = value.isoformat()
+                    elif hasattr(value, '__iter__') and not isinstance(value, (str, bytes)):  # 리스트나 기타 iterable
+                        row_dict[key] = list(value)
+                    else:
+                        row_dict[key] = value
+                        
+                results.append(row_dict)
+                row_count += 1
+            
+            # 실행 통계 정보 (QueryJob에서 가져오기)
+            total_rows = len(results)  # 기본적으로는 반환된 결과 수 사용
+            bytes_processed = 0
+            
+            try:
+                # QueryJob에서 통계 정보를 가져오려고 시도
+                if hasattr(query_job, 'total_rows') and query_job.total_rows is not None:
+                    total_rows = query_job.total_rows
+                if hasattr(query_job, 'total_bytes_processed') and query_job.total_bytes_processed is not None:
+                    bytes_processed = query_job.total_bytes_processed
+            except AttributeError:
+                # 속성이 없으면 기본값 사용
+                pass
+            
+            print(f"✅ 쿼리 실행 완료!")
+            print(f"   - 처리된 행 수: {len(results)}")
+            print(f"   - 전체 행 수: {total_rows}")
+            print(f"   - 처리된 바이트: {bytes_processed:,} bytes")
+            
+            if len(results) >= max_results and total_rows > max_results:
+                print(f"⚠️ 결과가 {max_results}개로 제한되었습니다. (전체: {total_rows}개)")
+            
+            return {
+                "success": True,
+                "results": results,
+                "total_rows": total_rows,
+                "returned_rows": len(results),
+                "bytes_processed": bytes_processed,
+                "query": query,
+                "truncated": len(results) >= max_results and total_rows > max_results
+            }
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"❌ 쿼리 실행 실패: {error_msg}")
+            
+            # 구체적인 에러 분석
+            error_type = "unknown"
+            suggestion = "쿼리 문법을 확인하세요."
+            
+            if "Syntax error" in error_msg or "Invalid" in error_msg:
+                error_type = "syntax_error"
+                suggestion = "SQL 문법을 확인하세요."
+            elif "Table" in error_msg and "not found" in error_msg:
+                error_type = "table_not_found"
+                suggestion = "테이블 이름을 확인하세요. dataset.table 형식으로 작성했는지 확인하세요."
+            elif "Column" in error_msg and "not found" in error_msg:
+                error_type = "column_not_found" 
+                suggestion = "컬럼 이름을 확인하세요."
+            elif "Access Denied" in error_msg or "Permission" in error_msg:
+                error_type = "permission_error"
+                suggestion = "BigQuery 접근 권한을 확인하세요."
+            elif "Query exceeded limit" in error_msg:
+                error_type = "resource_limit"
+                suggestion = "쿼리가 너무 복잡합니다. LIMIT을 추가하거나 조건을 추가하세요."
+            
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": error_type,
+                "suggestion": suggestion,
+                "query": query,
+                "results": []
+            }
 
 # 전역 클라이언트 인스턴스
 bq_client = BigQueryClient()

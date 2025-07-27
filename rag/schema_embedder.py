@@ -395,8 +395,16 @@ class SchemaEmbedder:
                 if cached_metadata:
                     last_updated = cached_metadata.get("last_updated", "").split('T')[0]
                     print(f"📅 마지막 업데이트: {last_updated}")
-                # BigQuery 클라이언트는 사용하지 않고 캐시된 데이터만 반환
-                return cached_schema
+                
+                # BigQuery 클라이언트 연결은 SQL 실행을 위해 필요
+                print("🔗 BigQuery 클라이언트 연결 (SQL 실행을 위해)...")
+                if bq_client.connect():
+                    bq_client.schema_info = cached_schema
+                    return cached_schema
+                else:
+                    print("⚠️ BigQuery 연결 실패, 하지만 캐시된 스키마는 사용 가능")
+                    bq_client.schema_info = cached_schema
+                    return cached_schema
         
         # 캐시가 없거나 무효한 경우 BigQuery에서 새로 조회
         print("🔗 BigQuery에서 스키마 정보 조회 중...")

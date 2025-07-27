@@ -4,7 +4,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langgraph.graph import StateGraph, END
 from workflow.state import SQLGeneratorState
-from workflow.nodes import clarifier, wait_for_user, sql_generator, explainer, orchestrator, final_answer
+from workflow.nodes import clarifier, wait_for_user, sql_generator, sql_executor, explainer, orchestrator, final_answer
 
 def create_workflow():
     """LangGraph 워크플로우 생성 및 구성"""
@@ -15,6 +15,7 @@ def create_workflow():
     workflow.add_node("clarifier", clarifier)
     workflow.add_node("wait_for_user", wait_for_user)
     workflow.add_node("sql_generator", sql_generator)
+    workflow.add_node("sql_executor", sql_executor)
     workflow.add_node("explainer", explainer)
     workflow.add_node("final_answer", final_answer)
     
@@ -28,7 +29,8 @@ def create_workflow():
         {
             "wait_for_user": "wait_for_user",
             "clarifier": "clarifier",
-            "sql_generator": "sql_generator", 
+            "sql_generator": "sql_generator",
+            "sql_executor": "sql_executor",
             "explainer": "explainer",
             "final_answer": "final_answer"
         }
@@ -41,6 +43,7 @@ def create_workflow():
             "wait_for_user": "wait_for_user",
             "clarifier": "clarifier",
             "sql_generator": "sql_generator",
+            "sql_executor": "sql_executor",
             "explainer": "explainer", 
             "final_answer": "final_answer"
         }
@@ -53,6 +56,20 @@ def create_workflow():
             "wait_for_user": "wait_for_user",
             "clarifier": "clarifier",
             "sql_generator": "sql_generator",
+            "sql_executor": "sql_executor",
+            "explainer": "explainer",
+            "final_answer": "final_answer"
+        }
+    )
+    
+    workflow.add_conditional_edges(
+        "sql_executor",
+        orchestrator,
+        {
+            "wait_for_user": "wait_for_user",
+            "clarifier": "clarifier",
+            "sql_generator": "sql_generator",
+            "sql_executor": "sql_executor",
             "explainer": "explainer",
             "final_answer": "final_answer"
         }
@@ -65,6 +82,7 @@ def create_workflow():
             "wait_for_user": "wait_for_user",
             "clarifier": "clarifier",
             "sql_generator": "sql_generator",
+            "sql_executor": "sql_executor",
             "explainer": "explainer",
             "final_answer": "final_answer"
         }
