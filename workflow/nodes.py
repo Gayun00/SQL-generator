@@ -3,6 +3,7 @@ from langchain.schema import HumanMessage, SystemMessage
 from workflow.state import SQLGeneratorState
 from core.config import LLM_CONFIG
 from db.bigquery_client import bq_client
+from rag.schema_retriever import schema_retriever
 import asyncio
 
 llm = ChatOpenAI(
@@ -98,30 +99,42 @@ async def wait_for_user(state: SQLGeneratorState) -> SQLGeneratorState:
             continue
 
 async def sql_generator(state: SQLGeneratorState) -> SQLGeneratorState:
-    """유효한 요청을 바탕으로 SQL 쿼리 생성"""
+    """유효한 요청을 바탕으로 SQL 쿼리 생성 (RAG 기반)"""
     print("📋 SQLGenerator 노드 호출됨 - SQL 쿼리 생성 중...")
     
-    # 스키마 정보 가져오기
-    schema_summary = bq_client.get_schema_summary()
+    user_query = state['userInput']
+    
+    # RAG를 통한 관련 스키마 검색
+    print("🔍 RAG 기반 관련 스키마 검색 중...")
+    relevant_context = schema_retriever.create_context_summary(user_query, max_tables=3)
+    
+    # 전체 스키마 정보도 백업으로 준비 (RAG 결과가 부족한 경우)
+    full_schema_summary = bq_client.get_schema_summary()
     
     system_prompt = f"""
-    다음 BigQuery 스키마를 참고하여 사용자 요청에 맞는 SQL 쿼리를 생성하세요.
+    사용자의 요청을 분석하여 BigQuery SQL 쿼리를 생성하세요.
     
-    {schema_summary}
+    우선적으로 다음 관련 스키마 정보를 참고하세요:
+    {relevant_context}
+    
+    필요시 전체 스키마 정보도 참고할 수 있습니다:
+    {full_schema_summary}
     
     주의사항:
     - BigQuery 문법을 사용하세요
     - 테이블명은 완전한 형식 (dataset.table)으로 작성하세요
     - 효율적이고 성능이 좋은 쿼리를 생성하세요
-    - 날짜 및 시간 처리에 주의하세요
+    - 날짜 및 시간 처리에 주의하세요 (TIMESTAMP, DATE 함수 활용)
     - LIMIT을 사용하여 결과를 제한하세요 (기본 100)
+    - JOIN이 필요한 경우 적절한 JOIN 조건을 사용하세요
+    - 집계 함수나 윈도우 함수가 필요한 경우 적절히 활용하세요
     
     SQL 쿼리만 반환하세요. 설명이나 다른 텍스트는 포함하지 마세요.
     """
     
     messages = [
         SystemMessage(content=system_prompt),
-        HumanMessage(content=f"사용자 요청: {state['userInput']}")
+        HumanMessage(content=f"사용자 요청: {user_query}")
     ]
     
     response = await llm.ainvoke(messages)

@@ -7,6 +7,8 @@ BigQuery 스키마 기반 SQL 쿼리 자동 생성 시스템
 import asyncio
 from workflow.workflow import create_workflow
 from db.bigquery_client import bq_client
+from rag.schema_embedder import schema_embedder
+from rag.schema_retriever import schema_retriever
 
 async def initialize_system():
     """시스템 초기화 - BigQuery 연결 및 스키마 정보 수집"""
@@ -27,8 +29,32 @@ async def initialize_system():
         print("❌ 스키마 정보 수집에 실패했습니다. 시스템을 종료합니다.")
         return False
     
+    # RAG 시스템 초기화
+    print(f"\n🧠 RAG 시스템 초기화 중...")
+    print("   - ChromaDB 벡터스토어 설정...")
+    if not schema_embedder.initialize_vectorstore():
+        print("❌ 벡터스토어 초기화에 실패했습니다. 시스템을 종료합니다.")
+        return False
+    
+    print("   - 스키마 정보 임베딩 중...")
+    if not schema_embedder.embed_schemas(schema_info):
+        print("❌ 스키마 임베딩에 실패했습니다. 시스템을 종료합니다.")
+        return False
+    
+    print("   - 스키마 검색기 초기화 중...")
+    if not schema_retriever.initialize():
+        print("❌ 스키마 검색기 초기화에 실패했습니다. 시스템을 종료합니다.")
+        return False
+    
+    # 초기화 완료 정보 출력
     print(f"\n✅ 시스템 초기화 완료!")
-    print(f"📊 총 {len(schema_info)}개 테이블의 스키마 정보를 로드했습니다.")
+    print(f"📊 BigQuery: {len(schema_info)}개 테이블의 스키마 정보 로드")
+    
+    # RAG 통계 정보
+    rag_stats = schema_retriever.get_statistics()
+    if rag_stats.get("status") == "ready":
+        print(f"🧠 RAG: {rag_stats.get('document_count', 0)}개 문서가 임베딩됨")
+    
     print("=" * 60)
     
     return True
