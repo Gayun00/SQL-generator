@@ -5,6 +5,7 @@ from core.config import LLM_CONFIG
 from db.bigquery_client import bq_client
 from rag.schema_retriever import schema_retriever
 import asyncio
+import json
 
 llm = ChatOpenAI(
     model=LLM_CONFIG["model"],
@@ -338,6 +339,122 @@ async def orchestrator(state: SQLGeneratorState) -> str:
     # 모든 게 완료되면 → FinalAnswer
     print("➡️ 다음 노드: FinalAnswer (모든 단계 완료)")
     return "final_answer"
+
+async def sql_analyzer(state: SQLGeneratorState) -> SQLGeneratorState:
+    """사용자 쿼리의 불확실한 요소 분석"""
+    print("🔍 SQLAnalyzer 노드 호출됨 - 쿼리 불확실성 분석 중...")
+    
+    user_query = state['userInput']
+    
+    # RAG를 통한 관련 스키마 검색
+    print("📋 RAG 기반 관련 스키마 검색 중...")
+    relevant_context = schema_retriever.create_context_summary(user_query, max_tables=5)
+    
+    system_prompt = f"""
+    사용자의 SQL 요청을 분석하여 불확실한 요소들을 식별하세요.
+    
+    다음 관련 스키마 정보를 참고하세요:
+    {relevant_context}
+    
+    불확실성 유형:
+    1. column_values: 컬럼에 어떤 값들이 있는지 모르는 경우
+       - 예: "상태가 '활성'인 사용자" → status 컬럼에 정확히 어떤 값들이 있는지 확인 필요
+       - 예: "카테고리별 매출" → category 컬럼의 실제 값들 확인 필요
+    
+    2. table_relationship: 테이블 간 관계가 불분명한 경우
+       - 예: "사용자별 주문 정보" → users와 orders 테이블의 연결 방법
+       - 예: "상품과 주문의 관계" → 중간 테이블 존재 여부
+    
+    3. data_range: 데이터의 범위나 분포가 불분명한 경우
+       - 예: "최근 데이터" → 실제 데이터의 날짜 범위
+       - 예: "인기 상품" → 판매량이나 평점의 기준값
+    
+    응답 형식 (JSON):
+    {{
+        "has_uncertainty": true/false,
+        "uncertainties": [
+            {{
+                "type": "column_values|table_relationship|data_range",
+                "description": "불확실성 설명",
+                "table": "관련 테이블명",
+                "column": "관련 컬럼명 (해당시)",
+                "exploration_query": "탐지를 위한 SQL 쿼리"
+            }}
+        ],
+        "confidence": 0.0-1.0
+    }}
+    
+    사용자 요청을 신중히 분석하여 정확한 SQL 생성을 위해 추가 정보가 필요한 부분을 찾아주세요.
+    """
+    
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=f"사용자 요청: {user_query}")
+    ]
+    
+    response = await llm.ainvoke(messages)
+    
+    try:
+        # JSON 응답 파싱 (코드 블록 제거)
+        response_content = response.content.strip()
+        
+        # ```json ... ``` 형태의 코드 블록 제거
+        if response_content.startswith("```json"):
+            response_content = response_content[7:]  # ```json 제거
+        if response_content.startswith("```"):
+            response_content = response_content[3:]   # ``` 제거
+        if response_content.endswith("```"):
+            response_content = response_content[:-3]  # 끝의 ``` 제거
+        
+        response_content = response_content.strip()
+        
+        analysis_result = json.loads(response_content)
+        
+        print(f"📊 불확실성 분석 완료:")
+        print(f"   - 불확실성 존재: {analysis_result.get('has_uncertainty', False)}")
+        print(f"   - 신뢰도: {analysis_result.get('confidence', 0.0):.2f}")
+        
+        uncertainties = analysis_result.get('uncertainties', [])
+        if uncertainties:
+            print(f"   - 발견된 불확실성: {len(uncertainties)}개")
+            for i, uncertainty in enumerate(uncertainties, 1):
+                print(f"     {i}. {uncertainty.get('type', 'unknown')}: {uncertainty.get('description', 'N/A')}")
+        
+        return {
+            **state,
+            "uncertaintyAnalysis": analysis_result,
+            "hasUncertainty": analysis_result.get('has_uncertainty', False)
+        }
+        
+    except json.JSONDecodeError as e:
+        print(f"⚠️ JSON 파싱 실패: {e}")
+        print(f"원본 응답: {response.content}")
+        
+        # 파싱 실패시 기본값 반환
+        return {
+            **state,
+            "uncertaintyAnalysis": {
+                "has_uncertainty": False,
+                "uncertainties": [],
+                "confidence": 0.0,
+                "error": "JSON 파싱 실패"
+            },
+            "hasUncertainty": False
+        }
+    
+    except Exception as e:
+        print(f"❌ 불확실성 분석 중 오류: {str(e)}")
+        
+        return {
+            **state,
+            "uncertaintyAnalysis": {
+                "has_uncertainty": False,
+                "uncertainties": [],
+                "confidence": 0.0,
+                "error": str(e)
+            },
+            "hasUncertainty": False
+        }
 
 async def final_answer(state: SQLGeneratorState) -> SQLGeneratorState:
     """최종 응답 출력"""
