@@ -73,6 +73,18 @@ class HybridManager:
         self.orchestrator.register_agent(self.query_agent)
         self.communication_hub.register_agent(self.query_agent)
         
+        # DataInvestigator Agent 등록
+        from .data_investigator_agent import create_data_investigator_agent
+        self.data_agent = create_data_investigator_agent()
+        self.orchestrator.register_agent(self.data_agent)
+        self.communication_hub.register_agent(self.data_agent)
+        
+        # CommunicationSpecialist Agent 등록
+        from .communication_specialist_agent import create_communication_specialist_agent
+        self.comm_agent = create_communication_specialist_agent()
+        self.orchestrator.register_agent(self.comm_agent)
+        self.communication_hub.register_agent(self.comm_agent)
+        
         # 통계 추적
         self.execution_stats = {
             "total_executions": 0,
