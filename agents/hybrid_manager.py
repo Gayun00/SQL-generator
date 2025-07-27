@@ -67,6 +67,12 @@ class HybridManager:
         self.orchestrator.register_agent(self.schema_agent)
         self.communication_hub.register_agent(self.schema_agent)
         
+        # QueryArchitect Agent 등록
+        from .query_architect_agent import create_query_architect_agent
+        self.query_agent = create_query_architect_agent()
+        self.orchestrator.register_agent(self.query_agent)
+        self.communication_hub.register_agent(self.query_agent)
+        
         # 통계 추적
         self.execution_stats = {
             "total_executions": 0,
