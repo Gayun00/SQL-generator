@@ -1,17 +1,21 @@
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from langgraph.graph import StateGraph, END
-from state import ScheduleState
-from nodes import clarifier, wait_for_user, planner, executor, orchestrator, final_answer
+from workflow.state import SQLGeneratorState
+from workflow.nodes import clarifier, wait_for_user, sql_generator, explainer, orchestrator, final_answer
 
 def create_workflow():
     """LangGraph 워크플로우 생성 및 구성"""
     
-    workflow = StateGraph(ScheduleState)
+    workflow = StateGraph(SQLGeneratorState)
     
     # 노드 추가
     workflow.add_node("clarifier", clarifier)
     workflow.add_node("wait_for_user", wait_for_user)
-    workflow.add_node("planner", planner)
-    workflow.add_node("executor", executor)
+    workflow.add_node("sql_generator", sql_generator)
+    workflow.add_node("explainer", explainer)
     workflow.add_node("final_answer", final_answer)
     
     # 시작점 설정
@@ -23,8 +27,9 @@ def create_workflow():
         orchestrator,
         {
             "wait_for_user": "wait_for_user",
-            "planner": "planner", 
-            "executor": "executor",
+            "clarifier": "clarifier",
+            "sql_generator": "sql_generator", 
+            "explainer": "explainer",
             "final_answer": "final_answer"
         }
     )
@@ -35,30 +40,32 @@ def create_workflow():
         {
             "wait_for_user": "wait_for_user",
             "clarifier": "clarifier",
-            "planner": "planner",
-            "executor": "executor", 
+            "sql_generator": "sql_generator",
+            "explainer": "explainer", 
             "final_answer": "final_answer"
         }
     )
     
     workflow.add_conditional_edges(
-        "planner",
+        "sql_generator",
         orchestrator,
         {
             "wait_for_user": "wait_for_user",
-            "planner": "planner",
-            "executor": "executor",
+            "clarifier": "clarifier",
+            "sql_generator": "sql_generator",
+            "explainer": "explainer",
             "final_answer": "final_answer"
         }
     )
     
     workflow.add_conditional_edges(
-        "executor", 
+        "explainer", 
         orchestrator,
         {
             "wait_for_user": "wait_for_user",
-            "planner": "planner",
-            "executor": "executor",
+            "clarifier": "clarifier",
+            "sql_generator": "sql_generator",
+            "explainer": "explainer",
             "final_answer": "final_answer"
         }
     )
@@ -70,17 +77,28 @@ def create_workflow():
 
 if __name__ == "__main__":
     import asyncio
+    from db.bigquery_client import bq_client
     
     async def main():
+        # BigQuery 초기화
+        print("🔗 BigQuery 연결 및 스키마 초기화 중...")
+        if not bq_client.connect():
+            print("❌ BigQuery 연결 실패. 프로그램을 종료합니다.")
+            return
+        
+        if not bq_client.initialize_schema():
+            print("❌ 스키마 초기화 실패. 프로그램을 종료합니다.")
+            return
+        
         # 워크플로우 생성
         app = create_workflow()
         
-        print("🚀 LangGraph A2A 워크플로우 시작!")
+        print("🚀 SQL Generator A2A 워크플로우 시작!")
         print("=" * 60)
         
         while True:
             # 사용자 입력 받기
-            user_input = input("\n💬 일정 관련 요청을 입력하세요 (종료하려면 'quit' 또는 'exit' 입력): ")
+            user_input = input("\n💬 SQL 생성 요청을 입력하세요 (종료하려면 'quit' 또는 'exit' 입력): ")
             
             if user_input.lower() in ['quit', 'exit', '종료']:
                 print("👋 워크플로우를 종료합니다.")
@@ -95,7 +113,9 @@ if __name__ == "__main__":
                 "userInput": user_input,
                 "isValid": False,  # clarifier에서 검증하도록 초기값은 False
                 "reason": None,
-                "plan": None,
+                "schemaInfo": None,
+                "sqlQuery": None,
+                "explanation": None,
                 "finalOutput": None
             }
             
@@ -111,8 +131,10 @@ if __name__ == "__main__":
                 print(f"✅ 유효성: {result.get('isValid')}")
                 if result.get('reason'):
                     print(f"💡 이유: {result.get('reason')}")
-                if result.get('plan'):
-                    print(f"📋 계획: {result.get('plan')}")
+                if result.get('sqlQuery'):
+                    print(f"📋 생성된 SQL: {result.get('sqlQuery')}")
+                if result.get('explanation'):
+                    print(f"📖 설명: {result.get('explanation')}")
                 if result.get('finalOutput'):
                     print(f"📄 최종 출력: {result.get('finalOutput')}")
                 

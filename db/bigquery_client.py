@@ -1,6 +1,6 @@
 from google.cloud import bigquery
 from google.oauth2 import service_account
-from config import BIGQUERY_CONFIG
+from core.config import BIGQUERY_CONFIG
 import json
 import os
 from typing import Dict, List, Optional

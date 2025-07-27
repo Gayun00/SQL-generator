@@ -1,0 +1,1 @@
+# Core module - Main configuration and business logic

@@ -4,8 +4,12 @@ BigQuery 연결 및 스키마 조회 테스트 스크립트
 """
 
 import asyncio
-from bigquery_client import bq_client
-from config import BIGQUERY_CONFIG
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from db.bigquery_client import bq_client
+from core.config import BIGQUERY_CONFIG
 
 async def test_bigquery_connection():
     """BigQuery 연결 테스트"""

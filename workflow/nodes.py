@@ -1,8 +1,8 @@
 from langchain_openai import ChatOpenAI
 from langchain.schema import HumanMessage, SystemMessage
-from state import SQLGeneratorState
-from config import LLM_CONFIG
-from bigquery_client import bq_client
+from workflow.state import SQLGeneratorState
+from core.config import LLM_CONFIG
+from db.bigquery_client import bq_client
 import asyncio
 
 llm = ChatOpenAI(
@@ -97,22 +97,26 @@ async def wait_for_user(state: SQLGeneratorState) -> SQLGeneratorState:
             print(f"❌ 입력 처리 중 오류가 발생했습니다: {str(e)}")
             continue
 
-async def planner(state: ScheduleState) -> ScheduleState:
-    """유효한 요청을 바탕으로 하루 일정 계획 수립"""
-    print("📋 Planner 노드 호출됨 - 하루 일정 계획 수립 중...")
+async def sql_generator(state: SQLGeneratorState) -> SQLGeneratorState:
+    """유효한 요청을 바탕으로 SQL 쿼리 생성"""
+    print("📋 SQLGenerator 노드 호출됨 - SQL 쿼리 생성 중...")
     
-    system_prompt = """
-    사용자의 요청을 바탕으로 하루 일정을 계획하세요.
-    시간대별로 구체적이고 실현 가능한 일정을 만들어주세요.
+    # 스키마 정보 가져오기
+    schema_summary = bq_client.get_schema_summary()
     
-    일정 형식:
-    - 각 항목은 "시간: 활동내용" 형태
-    - 현실적인 시간 배분
-    - 휴식 시간 포함
-    - 3-8개 정도의 주요 활동
+    system_prompt = f"""
+    다음 BigQuery 스키마를 참고하여 사용자 요청에 맞는 SQL 쿼리를 생성하세요.
     
-    응답은 JSON 배열 형태로 각 일정 항목을 문자열로 반환하세요.
-    예: ["08:00: 기상 및 아침 식사", "09:00: 업무 시작", ...]
+    {schema_summary}
+    
+    주의사항:
+    - BigQuery 문법을 사용하세요
+    - 테이블명은 완전한 형식 (dataset.table)으로 작성하세요
+    - 효율적이고 성능이 좋은 쿼리를 생성하세요
+    - 날짜 및 시간 처리에 주의하세요
+    - LIMIT을 사용하여 결과를 제한하세요 (기본 100)
+    
+    SQL 쿼리만 반환하세요. 설명이나 다른 텍스트는 포함하지 마세요.
     """
     
     messages = [
@@ -122,43 +126,54 @@ async def planner(state: ScheduleState) -> ScheduleState:
     
     response = await llm.ainvoke(messages)
     
-    # JSON 파싱 시도, 실패시 기본 일정으로 대체
-    try:
-        import json
-        plan_list = json.loads(response.content)
-    except:
-        # 파싱 실패시 응답을 줄 단위로 분할
-        plan_list = [line.strip() for line in response.content.split('\n') if line.strip()]
-    
     return {
         **state,
-        "plan": plan_list
+        "schemaInfo": bq_client.schema_info,
+        "sqlQuery": response.content.strip()
     }
 
-async def executor(state: ScheduleState) -> ScheduleState:
-    """수립된 계획을 자연어 문장으로 요약"""
-    print("⚡ Executor 노드 호출됨 - 일정을 자연어로 요약 중...")
+async def explainer(state: SQLGeneratorState) -> SQLGeneratorState:
+    """생성된 SQL 쿼리에 대한 설명 생성"""
+    print("⚡ Explainer 노드 호출됨 - SQL 쿼리 설명 생성 중...")
     
     system_prompt = """
-    다음 하루 일정을 자연스럽고 읽기 쉬운 문장으로 요약해주세요.
-    친근하고 도움이 되는 톤으로 작성하며, 전체 일정의 흐름을 잘 설명해주세요.
+    다음 SQL 쿼리에 대해 사용자가 이해하기 쉬운 설명을 생성해주세요.
+    
+    설명에 포함할 내용:
+    1. 쿼리의 주요 목적
+    2. 사용된 테이블과 컬럼
+    3. 주요 로직 및 조건
+    4. 예상되는 결과 형태
+    
+    친근하고 이해하기 쉬운 톤으로 작성해주세요.
     """
     
-    plan_text = "\n".join(state.get("plan", []))
+    sql_query = state.get("sqlQuery", "")
     
     messages = [
         SystemMessage(content=system_prompt),
-        HumanMessage(content=f"일정 목록:\n{plan_text}")
+        HumanMessage(content=f"SQL 쿼리:\n{sql_query}")
     ]
     
     response = await llm.ainvoke(messages)
     
+    # 최종 출력 구성
+    final_output = f"""=== 생성된 SQL 쿼리 ===
+
+```sql
+{sql_query}
+```
+
+=== 쿼리 설명 ===
+{response.content}"""
+    
     return {
         **state,
-        "finalOutput": response.content
+        "explanation": response.content,
+        "finalOutput": final_output
     }
 
-async def orchestrator(state: ScheduleState) -> str:
+async def orchestrator(state: SQLGeneratorState) -> str:
     """현재 상태에 따라 다음 노드를 결정"""
     print("🎯 Orchestrator 노드 호출됨 - 다음 단계 결정 중...")
     print(f"현재 상태: isValid={state.get('isValid')}, userInput='{state.get('userInput')}', reason='{state.get('reason')}'")
@@ -196,9 +211,9 @@ async def orchestrator(state: ScheduleState) -> str:
     print("➡️ 다음 노드: FinalAnswer (모든 단계 완료)")
     return "final_answer"
 
-async def final_answer(state: ScheduleState) -> ScheduleState:
+async def final_answer(state: SQLGeneratorState) -> SQLGeneratorState:
     """최종 응답 출력"""
     print("✅ FinalAnswer 노드 호출됨 - 최종 응답 준비 완료!")
-    print(f"🎉 최종 결과:\n{state.get('finalOutput', '일정 생성 완료')}")
+    print(f"🎉 최종 결과:\n{state.get('finalOutput', 'SQL 생성 완료')}")
     
     return state
