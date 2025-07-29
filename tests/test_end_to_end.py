@@ -8,7 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from workflow.workflow import create_workflow
+from workflow.a2a_workflow import create_a2a_workflow
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
 from rag.schema_retriever import schema_retriever
@@ -41,34 +41,15 @@ async def test_simple_query_flow():
     """간단한 쿼리의 전체 플로우 테스트"""
     print("\n🔍 간단한 쿼리 전체 플로우 테스트 중...")
     
-    # 워크플로우 생성
-    app = create_workflow()
+    # A2A 워크플로우 생성
+    workflow_manager = create_a2a_workflow()
     
     # 간단한 테스트 쿼리
     test_input = "users 테이블에서 모든 사용자 정보 조회"
     
-    initial_state = {
-        "userInput": test_input,
-        "isValid": False,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None,
-        "needsClarification": None,
-        "clarificationQuestions": None,
-        "clarificationSummary": None,
-        "userAnswers": None
-    }
-    
     try:
         print(f"📝 입력: {test_input}")
-        result = await app.ainvoke(initial_state)
+        result = await workflow_manager.execute_workflow(test_input)
         
         # 결과 검증
         success_checks = []
@@ -127,34 +108,15 @@ async def test_uncertain_query_flow():
     """불확실성이 있는 쿼리의 전체 플로우 테스트"""
     print("\n🔍 불확실성 있는 쿼리 전체 플로우 테스트 중...")
     
-    # 워크플로우 생성
-    app = create_workflow()
+    # A2A 워크플로우 생성
+    workflow_manager = create_a2a_workflow()
     
     # 불확실성이 있는 테스트 쿼리
     test_input = "상태가 '활성'인 사용자들의 주문 내역을 보여줘"
     
-    initial_state = {
-        "userInput": test_input,
-        "isValid": False,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None,
-        "needsClarification": None,
-        "clarificationQuestions": None,
-        "clarificationSummary": None,
-        "userAnswers": None
-    }
-    
     try:
         print(f"📝 입력: {test_input}")
-        result = await app.ainvoke(initial_state)
+        result = await workflow_manager.execute_workflow(test_input)
         
         # 결과 검증
         success_checks = []
@@ -220,42 +182,28 @@ async def test_workflow_node_connections():
     print("\n🔍 워크플로우 노드 연결 테스트 중...")
     
     try:
-        # 워크플로우 생성이 성공하는지 확인
-        app = create_workflow()
+        # A2A 워크플로우 생성이 성공하는지 확인
+        workflow_manager = create_a2a_workflow()
         
-        if app:
-            print("✅ 워크플로우 생성 성공")
+        if workflow_manager:
+            print("✅ A2A 워크플로우 생성 성공")
             
-            # 간단한 상태로 테스트
-            test_state = {
-                "userInput": "테스트",
-                "isValid": False,
-                "reason": None,
-                "schemaInfo": None,
-                "sqlQuery": None,
-                "explanation": None,
-                "finalOutput": None,
-                "queryResults": None,
-                "executionStatus": None,
-                "uncertaintyAnalysis": None,
-                "hasUncertainty": None,
-                "explorationResults": None,
-                "needsClarification": None,
-                "clarificationQuestions": None,
-                "clarificationSummary": None,
-                "userAnswers": None
-            }
-            
-            # 첫 번째 노드만 실행해서 연결 확인
+            # 간단한 테스트로 구조 확인
             try:
-                # 여기서는 실제 실행하지 않고 구조만 확인
-                print("✅ 워크플로우 구조 유효성 확인 완료")
-                return True
+                # A2A 워크플로우 구조 확인
+                agents = workflow_manager.get_available_agents()
+                if agents:
+                    print(f"✅ 사용 가능한 Agent 수: {len(agents)}")
+                    print("✅ A2A 워크플로우 구조 유효성 확인 완료")
+                    return True
+                else:
+                    print("❌ 사용 가능한 Agent 없음")
+                    return False
             except Exception as e:
-                print(f"❌ 워크플로우 실행 구조 오류: {str(e)}")
+                print(f"❌ A2A 워크플로우 구조 오류: {str(e)}")
                 return False
         else:
-            print("❌ 워크플로우 생성 실패")
+            print("❌ A2A 워크플로우 생성 실패")
             return False
             
     except Exception as e:
@@ -275,7 +223,7 @@ async def main():
         return False
     
     tests = [
-        ("워크플로우 노드 연결", test_workflow_node_connections),
+        ("A2A 워크플로우 Agent 연결", test_workflow_node_connections),
         ("간단한 쿼리 전체 플로우", test_simple_query_flow),
         ("불확실성 있는 쿼리 플로우", test_uncertain_query_flow)
     ]

@@ -5,7 +5,7 @@ BigQuery 스키마 기반 SQL 쿼리 자동 생성 시스템
 """
 
 import asyncio
-from workflow.workflow import create_workflow
+from workflow.a2a_workflow import create_a2a_workflow
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
 from rag.schema_retriever import schema_retriever
@@ -53,8 +53,8 @@ async def main():
         if not await initialize_system():
             return
         
-        # 워크플로우 생성 및 실행
-        app = create_workflow()
+        # A2A 워크플로우 생성 및 실행
+        workflow_manager = create_a2a_workflow()
         
         print("\n🚀 SQL Generator A2A 워크플로우 시작!")
         print("💡 사용 가능한 명령:")
@@ -74,23 +74,12 @@ async def main():
                 print("⚠️ 입력이 비어있습니다. 다시 입력해주세요.")
                 continue
             
-            # 초기 상태 설정
-            initial_state = {
-                "userInput": user_input,
-                "isValid": False,  # clarifier에서 검증하도록 초기값은 False
-                "reason": None,
-                "schemaInfo": None,
-                "sqlQuery": None,
-                "explanation": None,
-                "finalOutput": None
-            }
-            
             print(f"\n📝 처리 중: {user_input}")
             print("-" * 40)
             
             try:
-                # 워크플로우 실행
-                result = await app.ainvoke(initial_state)
+                # A2A 워크플로우 실행
+                result = await workflow_manager.execute_workflow(user_input)
                 
                 print("\n" + "=" * 60)
                 print("🎯 처리 결과:")
@@ -105,6 +94,11 @@ async def main():
                         print(f"📋 생성된 SQL: {result.get('sqlQuery')}")
                     if result.get('explanation'):
                         print(f"📖 설명: {result.get('explanation')}")
+                
+                # 실행 히스토리 간단 표시
+                if result.get('execution_history'):
+                    agent_names = [agent.get('agent_name', 'Unknown') for agent in result['execution_history']]
+                    print(f"🔄 실행된 Agents: {' → '.join(agent_names)}")
                 
             except Exception as e:
                 print(f"\n❌ 처리 중 오류가 발생했습니다: {str(e)}")
