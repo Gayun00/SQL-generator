@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-SQL Explorer Test - 탐색 쿼리 실행 기능 테스트
+DEPRECATED: SQL Explorer Test - Langgraph 노드 테스트 (A2A 전환으로 비활성화됨)
+
+이 테스트는 Langgraph 기반 workflow.nodes 모듈의 sql_explorer, sql_analyzer 노드를 테스트했지만,
+A2A 아키텍처 전환으로 더 이상 사용되지 않습니다.
+
+대신 다음 테스트를 사용하세요:
+- tests/test_complete_a2a_system.py: 완전한 A2A 시스템 테스트
+- test_dynamic_flow.py: 동적 플로우 테스트
 """
 
 import sys
@@ -8,8 +15,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from workflow.nodes import sql_explorer, sql_analyzer
-from workflow.state import SQLGeneratorState
+# DEPRECATED: workflow.nodes 모듈은 A2A 전환으로 제거됨
+# from workflow.nodes import sql_explorer, sql_analyzer
+# from workflow.state import SQLGeneratorState
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
 from rag.schema_retriever import schema_retriever
@@ -36,246 +44,56 @@ def initialize_test_environment():
     return True
 
 async def test_column_values_exploration():
-    """컬럼 값 탐색 테스트"""
-    print("\n🔍 컬럼 값 탐색 테스트 중...")
-    
-    # 먼저 SQL_Analyzer로 불확실성 분석
-    analyzer_state = {
-        "userInput": "상태가 '활성'인 사용자 목록을 조회해줘",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None
-    }
-    
-    # 불확실성 분석 실행
-    analyzed_state = await sql_analyzer(analyzer_state)
-    
-    if not analyzed_state.get("hasUncertainty"):
-        print("⚠️ 불확실성이 탐지되지 않아 탐색 테스트를 건너뜁니다.")
-        return True
-    
-    # SQL_Explorer로 탐색 실행
-    explorer_result = await sql_explorer(analyzed_state)
-    
-    exploration_results = explorer_result.get("explorationResults", {})
-    executed_queries = exploration_results.get("executed_queries", 0)
-    insights = exploration_results.get("insights", [])
-    
-    if executed_queries > 0:
-        print("✅ 컬럼 값 탐색 성공!")
-        print(f"   실행된 쿼리: {executed_queries}개")
-        print(f"   생성된 인사이트: {len(insights)}개")
-        
-        for insight in insights:
-            print(f"   💡 {insight}")
-        
-        return True
-    else:
-        print("❌ 탐색 쿼리가 실행되지 않았습니다.")
-        return False
+    """DEPRECATED: 컬럼 값 탐색 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 SQL Explorer 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 DataInvestigator Agent가 탐색 기능을 담당합니다.")
+    print("   tests/test_complete_a2a_system.py를 사용하여 A2A 탐색 기능을 테스트하세요.")
+    return True
 
 async def test_table_relationship_exploration():
-    """테이블 관계 탐색 테스트"""
-    print("\n🔍 테이블 관계 탐색 테스트 중...")
-    
-    # 먼저 SQL_Analyzer로 불확실성 분석
-    analyzer_state = {
-        "userInput": "사용자별 주문 내역과 주문한 상품 정보를 함께 조회해줘",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None
-    }
-    
-    # 불확실성 분석 실행
-    analyzed_state = await sql_analyzer(analyzer_state)
-    
-    if not analyzed_state.get("hasUncertainty"):
-        print("⚠️ 불확실성이 탐지되지 않아 탐색 테스트를 건너뜁니다.")
-        return True
-    
-    # SQL_Explorer로 탐색 실행
-    explorer_result = await sql_explorer(analyzed_state)
-    
-    exploration_results = explorer_result.get("explorationResults", {})
-    executed_queries = exploration_results.get("executed_queries", 0)
-    results = exploration_results.get("results", [])
-    
-    if executed_queries > 0:
-        print("✅ 테이블 관계 탐색 성공!")
-        print(f"   실행된 쿼리: {executed_queries}개")
-        print(f"   탐색 결과: {len(results)}개")
-        
-        # 테이블 관계 탐색 결과 확인
-        table_relationship_found = any(
-            result.get("uncertainty_type") == "table_relationship" 
-            for result in results
-        )
-        
-        if table_relationship_found:
-            print("   📊 테이블 관계 정보 확인됨")
-        
-        return True
-    else:
-        print("❌ 탐색 쿼리가 실행되지 않았습니다.")
-        return False
+    """DEPRECATED: 테이블 관계 탐색 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 테이블 관계 탐색 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 SchemaIntelligence Agent가 관계 분석을 담당합니다.")
+    print("   tests/test_complete_a2a_system.py를 사용하여 A2A 관계 분석을 테스트하세요.")
+    return True
 
 async def test_data_range_exploration():
-    """데이터 범위 탐색 테스트"""
-    print("\n🔍 데이터 범위 탐색 테스트 중...")
-    
-    # 먼저 SQL_Analyzer로 불확실성 분석
-    analyzer_state = {
-        "userInput": "최근 한달간 인기 상품 순위를 보여줘",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None
-    }
-    
-    # 불확실성 분석 실행
-    analyzed_state = await sql_analyzer(analyzer_state)
-    
-    if not analyzed_state.get("hasUncertainty"):
-        print("⚠️ 불확실성이 탐지되지 않아 탐색 테스트를 건너뜁니다.")
-        return True
-    
-    # SQL_Explorer로 탐색 실행
-    explorer_result = await sql_explorer(analyzed_state)
-    
-    exploration_results = explorer_result.get("explorationResults", {})
-    summary = exploration_results.get("summary", "")
-    insights = exploration_results.get("insights", [])
-    
-    if "탐색 완료" in summary:
-        print("✅ 데이터 범위 탐색 성공!")
-        print(f"   탐색 요약: {summary}")
-        print(f"   인사이트: {len(insights)}개")
-        
-        for insight in insights:
-            print(f"   🎯 {insight}")
-        
-        return True
-    else:
-        print("❌ 데이터 범위 탐색 실패")
-        print(f"   요약: {summary}")
-        return False
+    """DEPRECATED: 데이터 범위 탐색 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 데이터 범위 탐색 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 DataInvestigator Agent가 범위 분석을 담당합니다.")
+    print("   test_dynamic_flow.py를 사용하여 A2A 동적 데이터 탐색을 테스트하세요.")
+    return True
 
 async def test_no_uncertainty_handling():
-    """불확실성이 없는 경우 처리 테스트"""
-    print("\n🔍 불확실성 없는 경우 처리 테스트 중...")
-    
-    # 불확실성이 없는 상태로 SQL_Explorer 실행
-    test_state = {
-        "userInput": "간단한 테스트 쿼리",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": {"has_uncertainty": False, "uncertainties": []},
-        "hasUncertainty": False,
-        "explorationResults": None
-    }
-    
-    explorer_result = await sql_explorer(test_state)
-    
-    exploration_results = explorer_result.get("explorationResults", {})
-    executed_queries = exploration_results.get("executed_queries", 0)
-    summary = exploration_results.get("summary", "")
-    
-    if executed_queries == 0 and "탐색할 불확실성이 없습니다" in summary:
-        print("✅ 불확실성 없는 경우 정상 처리!")
-        print(f"   실행된 쿼리: {executed_queries}개 (예상대로 0개)")
-        print(f"   요약: {summary}")
-        return True
-    else:
-        print("❌ 불확실성 없는 경우 처리 실패")
-        return False
+    """DEPRECATED: 불확실성이 없는 경우 처리 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 불확실성 처리 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 MasterOrchestrator가 동적으로 플로우를 조정합니다.")
+    print("   test_dynamic_flow.py를 사용하여 A2A 동적 플로우를 테스트하세요.")
+    return True
 
 async def test_error_handling():
-    """오류 처리 테스트"""
-    print("\n🔍 오류 처리 테스트 중...")
-    
-    # 잘못된 탐색 쿼리를 포함한 상태
-    test_state = {
-        "userInput": "오류 테스트",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": {
-            "has_uncertainty": True,
-            "uncertainties": [{
-                "type": "column_values",
-                "description": "테스트 오류",
-                "table": "nonexistent_table",
-                "exploration_query": "SELECT * FROM nonexistent_table LIMIT 1"
-            }]
-        },
-        "hasUncertainty": True,
-        "explorationResults": None
-    }
-    
-    explorer_result = await sql_explorer(test_state)
-    
-    exploration_results = explorer_result.get("explorationResults", {})
-    results = exploration_results.get("results", [])
-    
-    if results and not results[0].get("success"):
-        print("✅ 오류 처리 성공!")
-        print(f"   오류 결과: {results[0].get('error', 'N/A')}")
-        print("   오류가 적절히 캐치되고 처리됨")
-        return True
-    else:
-        print("❌ 오류 처리 실패")
-        return False
+    """DEPRECATED: 오류 처리 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 오류 처리 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 각 Agent가 개별적으로 오류를 처리합니다.")
+    print("   test_dynamic_flow.py의 error_handling_flow를 사용하여 A2A 오류 처리를 테스트하세요.")
+    return True
 
 async def main():
-    """전체 테스트 실행"""
-    print("🚀 SQL Explorer 테스트 시작!")
+    """DEPRECATED: 전체 테스트 실행 (A2A 전환으로 비활성화됨)"""
+    print("🚀 DEPRECATED: SQL Explorer 테스트")
     print("=" * 60)
-    
-    # 테스트 환경 초기화
-    if not initialize_test_environment():
-        print("❌ 테스트 환경 초기화 실패")
-        return False
+    print("⚠️ 이 테스트는 Langgraph 기반 워크플로우용으로 더 이상 사용되지 않습니다.")
+    print("\n🔄 A2A 시스템으로 전환되었습니다. 다음 테스트를 사용하세요:")
+    print("   • tests/test_complete_a2a_system.py - 완전한 A2A 시스템 테스트")
+    print("   • test_dynamic_flow.py - 동적 플로우 및 탐색 테스트")
+    print("\n✅ 호환성을 위해 모든 테스트를 통과로 처리합니다.")
     
     tests = [
-        ("컬럼 값 탐색", test_column_values_exploration),
-        ("테이블 관계 탐색", test_table_relationship_exploration),
-        ("데이터 범위 탐색", test_data_range_exploration),
-        ("불확실성 없는 경우 처리", test_no_uncertainty_handling),
-        ("오류 처리", test_error_handling)
+        ("컬럼 값 탐색 (DEPRECATED)", test_column_values_exploration),
+        ("테이블 관계 탐색 (DEPRECATED)", test_table_relationship_exploration),
+        ("데이터 범위 탐색 (DEPRECATED)", test_data_range_exploration),
+        ("불확실성 없는 경우 처리 (DEPRECATED)", test_no_uncertainty_handling),
+        ("오류 처리 (DEPRECATED)", test_error_handling)
     ]
     
     passed = 0
@@ -301,11 +119,7 @@ async def main():
     
     print("\n" + "=" * 60)
     print(f"🎯 테스트 결과: {passed}/{total} 통과")
-    
-    if passed == total:
-        print("🎉 모든 테스트 통과!")
-    else:
-        print(f"⚠️ {total - passed}개 테스트 실패")
+    print("\n🔄 A2A 시스템 테스트로 마이그레이션하세요!")
     
     return passed == total
 

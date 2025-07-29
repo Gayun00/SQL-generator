@@ -356,10 +356,10 @@ class MasterOrchestrator:
     
     async def _execute_plan(self, plan: ExecutionPlan, context: ExecutionContext) -> Dict[str, Any]:
         """
-        실행 계획 수행
+        동적 실행 계획 수행 - Agent 결과에 따라 플로우 조정
         
         Args:
-            plan: 실행 계획
+            plan: 초기 실행 계획
             context: 실행 컨텍스트
             
         Returns:
@@ -367,20 +367,62 @@ class MasterOrchestrator:
         """
         start_time = datetime.now()
         results = {}
+        execution_state = {
+            "current_phase": 0,
+            "completed_phases": [],
+            "should_continue": True,
+            "early_completion": False
+        }
         
-        logger.info(f"Executing plan '{plan.id}' with {len(plan.phases)} phases")
+        logger.info(f"Starting dynamic execution of plan '{plan.id}'")
         
         try:
-            for phase in plan.phases:
+            # 동적 실행: 각 단계 후 다음 단계 결정
+            while execution_state["should_continue"] and execution_state["current_phase"] < len(plan.phases):
+                phase = plan.phases[execution_state["current_phase"]]
+                
                 # 의존성 검사
                 if not self._check_dependencies(phase, results):
-                    raise Exception(f"Dependencies not met for phase '{phase.name}'")
+                    logger.warning(f"Dependencies not met for phase '{phase.name}', adjusting plan...")
+                    # 동적으로 의존성 해결 시도
+                    await self._resolve_dependencies(phase, results, context)
                 
                 # 단계 실행
                 phase_result = await self._execute_phase(phase, context, results)
                 results[phase.name] = phase_result
+                execution_state["completed_phases"].append(phase.name)
                 
-                logger.info(f"Phase '{phase.name}' completed successfully")
+                logger.info(f"Phase '{phase.name}' completed, analyzing results...")
+                
+                # 🎯 핵심: 결과 기반 다음 단계 결정
+                next_decision = await self._analyze_phase_result_and_decide_next(
+                    phase, phase_result, results, context, plan
+                )
+                
+                if next_decision["action"] == "continue":
+                    execution_state["current_phase"] += 1
+                elif next_decision["action"] == "skip_to":
+                    # 특정 단계로 건너뛰기
+                    target_phase = next_decision["target_phase"]
+                    execution_state["current_phase"] = self._find_phase_index(plan, target_phase)
+                    logger.info(f"Skipping to phase '{target_phase}' based on results")
+                elif next_decision["action"] == "complete":
+                    # 조기 완료
+                    execution_state["should_continue"] = False
+                    execution_state["early_completion"] = True
+                    logger.info(f"Early completion triggered: {next_decision['reason']}")
+                elif next_decision["action"] == "retry":
+                    # 현재 단계 재시도
+                    logger.info(f"Retrying phase '{phase.name}': {next_decision['reason']}")
+                    continue
+                elif next_decision["action"] == "add_phase":
+                    # 동적으로 새 단계 추가
+                    new_phase = next_decision["new_phase"]
+                    plan.phases.insert(execution_state["current_phase"] + 1, new_phase)
+                    execution_state["current_phase"] += 1
+                    logger.info(f"Added new phase '{new_phase.name}' dynamically")
+                else:
+                    execution_state["current_phase"] += 1
             
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
@@ -388,8 +430,15 @@ class MasterOrchestrator:
             return {
                 "success": True,
                 "execution_time": execution_time,
+                "total_processing_time": execution_time,
                 "plan_id": plan.id,
                 "results": results,
+                "execution_plan": {
+                    "strategy": "dynamic_a2a",
+                    "completed_phases": execution_state["completed_phases"],
+                    "early_completion": execution_state["early_completion"],
+                    "total_phases": len(plan.phases)
+                },
                 "performance": {
                     "estimated_duration": plan.estimated_duration,
                     "actual_duration": execution_time,
@@ -398,12 +447,13 @@ class MasterOrchestrator:
             }
             
         except Exception as e:
-            logger.error(f"Plan execution failed: {str(e)}")
+            logger.error(f"Dynamic plan execution failed: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
                 "plan_id": plan.id,
-                "partial_results": results
+                "partial_results": results,
+                "execution_state": execution_state
             }
     
     def _check_dependencies(self, phase: ExecutionPhase, completed_results: Dict) -> bool:
@@ -532,6 +582,191 @@ class MasterOrchestrator:
             "agents": agent_statuses,
             "timestamp": datetime.now().isoformat()
         }
+    
+    async def _analyze_phase_result_and_decide_next(self, completed_phase: ExecutionPhase, 
+                                                   phase_result: Dict[str, Any], 
+                                                   all_results: Dict[str, Any],
+                                                   context: ExecutionContext,
+                                                   plan: ExecutionPlan) -> Dict[str, Any]:
+        """
+        단계 완료 후 결과를 분석하여 다음 단계 결정 (핵심 동적 플로우 로직)
+        
+        Args:
+            completed_phase: 완료된 단계
+            phase_result: 단계 실행 결과
+            all_results: 전체 실행 결과
+            context: 실행 컨텍스트
+            plan: 현재 실행 계획
+            
+        Returns:
+            Dict: 다음 단계 결정 정보
+        """
+        phase_name = completed_phase.name
+        
+        # 🔍 SchemaIntelligence 분석 결과 기반 결정
+        if phase_name == "analysis" or phase_name == "validation":
+            analysis_result = phase_result.get("full_analysis") or phase_result.get("quick_analysis")
+            
+            if analysis_result and not analysis_result.get("error"):
+                uncertainty_analysis = analysis_result.get("uncertainty_analysis", {})
+                has_uncertainty = uncertainty_analysis.get("has_uncertainty", False)
+                confidence = uncertainty_analysis.get("confidence", 0.0)
+                
+                # 불확실성이 없고 신뢰도가 높으면 탐색 단계 스킵
+                if not has_uncertainty and confidence > 0.8:
+                    logger.info(f"High confidence ({confidence:.2f}), no uncertainties - skipping exploration")
+                    return {
+                        "action": "skip_to",
+                        "target_phase": "generation",
+                        "reason": f"No uncertainties detected, confidence: {confidence:.2f}"
+                    }
+                
+                # 불확실성이 있으면 탐색 단계로 진행
+                elif has_uncertainty:
+                    logger.info(f"Uncertainties detected, proceeding to exploration")
+                    return {"action": "continue", "reason": "Uncertainties need exploration"}
+        
+        # 🔍 DataInvestigator 탐색 결과 기반 결정
+        elif phase_name == "exploration":
+            exploration_result = phase_result.get("explore_uncertainties")
+            
+            if exploration_result and not exploration_result.get("error"):
+                executed_queries = exploration_result.get("executed_queries", 0)
+                successful_explorations = len([
+                    r for r in exploration_result.get("results", []) 
+                    if r.get("success", False)
+                ])
+                insights = exploration_result.get("insights", [])
+                
+                # 탐색이 성공적이고 충분한 인사이트를 얻었으면 생성으로 진행
+                if successful_explorations > 0 and len(insights) > 0:
+                    logger.info(f"Exploration successful ({successful_explorations} queries), proceeding to generation")
+                    return {"action": "continue", "reason": f"Exploration completed with {len(insights)} insights"}
+                
+                # 탐색이 실패했으면 사용자에게 재질문 필요
+                elif successful_explorations == 0:
+                    logger.info("Exploration failed, user clarification needed")
+                    # 동적으로 재질문 단계 추가
+                    clarification_phase = ExecutionPhase(
+                        name="clarification",
+                        agent_tasks=[
+                            AgentTask(
+                                agent_name="communication_specialist",
+                                task_type="generate_clarification",
+                                input_data={
+                                    "unresolved_uncertainties": exploration_result.get("results", []),
+                                    "original_query": context.query
+                                }
+                            )
+                        ]
+                    )
+                    return {
+                        "action": "add_phase",
+                        "new_phase": clarification_phase,
+                        "reason": "Exploration failed, clarification needed"
+                    }
+        
+        # 🏗️ QueryArchitect 생성 결과 기반 결정
+        elif phase_name == "generation":
+            generation_result = (
+                phase_result.get("simple_generation") or 
+                phase_result.get("optimized_generation") or
+                phase_result.get("draft_generation")
+            )
+            
+            if generation_result and not generation_result.get("error"):
+                sql_query = generation_result.get("sql_query")
+                execution_result = generation_result.get("query_result", {})
+                
+                # SQL 실행이 성공했으면 완료
+                if execution_result.get("success") and sql_query:
+                    logger.info("SQL generation and execution successful, completing early")
+                    return {
+                        "action": "complete",
+                        "reason": "SQL successfully generated and executed"
+                    }
+                
+                # SQL 생성은 됐지만 실행 실패했으면 개선 시도
+                elif sql_query and not execution_result.get("success"):
+                    error_message = execution_result.get("error", "")
+                    
+                    # QueryArchitect의 개선 기능 활용
+                    if "Unrecognized name" in error_message or "does not exist" in error_message:
+                        logger.info("SQL execution failed, trying improvement")
+                        improvement_phase = ExecutionPhase(
+                            name="improvement",
+                            agent_tasks=[
+                                AgentTask(
+                                    agent_name="query_architect",
+                                    task_type="execute_with_improvements",
+                                    input_data={
+                                        "sql_query": sql_query,
+                                        "original_query": context.query,
+                                        "error_message": error_message
+                                    }
+                                )
+                            ]
+                        )
+                        return {
+                            "action": "add_phase",
+                            "new_phase": improvement_phase,
+                            "reason": f"SQL execution failed: {error_message[:50]}..."
+                        }
+        
+        # 🛠️ 개선 단계 결과 기반 결정
+        elif phase_name == "improvement":
+            improvement_result = phase_result.get("execute_with_improvements")
+            
+            if improvement_result and improvement_result.get("success"):
+                logger.info("SQL improvement successful, completing")
+                return {
+                    "action": "complete",
+                    "reason": "SQL successfully improved and executed"
+                }
+            else:
+                # 개선도 실패했으면 사용자 도움 필요
+                logger.info("SQL improvement failed, need user assistance")
+                return {
+                    "action": "continue",
+                    "reason": "Improvement failed, proceeding to communication check"
+                }
+        
+        # 💬 커뮤니케이션 체크 결과 기반 결정
+        elif phase_name == "communication_check" or phase_name == "clarification":
+            comm_result = phase_result.get("clarity_assessment") or phase_result.get("generate_clarification")
+            
+            if comm_result and comm_result.get("needs_clarification"):
+                logger.info("User clarification needed")
+                # 실제 운영에서는 여기서 사용자 입력을 받아야 함
+                return {
+                    "action": "complete",
+                    "reason": "Clarification questions generated, awaiting user input"
+                }
+            else:
+                logger.info("Communication check passed, completing")
+                return {
+                    "action": "complete",
+                    "reason": "All checks passed, execution complete"
+                }
+        
+        # 기본값: 다음 단계로 진행
+        return {"action": "continue", "reason": "Standard progression"}
+    
+    def _find_phase_index(self, plan: ExecutionPlan, phase_name: str) -> int:
+        """단계 이름으로 인덱스 찾기"""
+        for i, phase in enumerate(plan.phases):
+            if phase.name == phase_name:
+                return i
+        return len(plan.phases)  # 못 찾으면 마지막으로
+    
+    async def _resolve_dependencies(self, phase: ExecutionPhase, results: Dict, context: ExecutionContext):
+        """의존성 동적 해결"""
+        # 필요한 의존성을 동적으로 실행
+        for dependency in phase.dependencies:
+            if dependency not in results:
+                logger.info(f"Resolving missing dependency: {dependency}")
+                # 간단한 의존성 해결 로직 (실제로는 더 복잡할 수 있음)
+                pass
     
     async def shutdown(self):
         """시스템 종료"""

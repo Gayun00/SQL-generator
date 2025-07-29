@@ -360,8 +360,7 @@ async def main():
         print("   2. 🏗️  QueryArchitect Agent - SQL 설계, 최적화 및 자동 개선")
         print("   3. 🔍 DataInvestigator Agent - 데이터 탐색 및 불확실성 해결") 
         print("   4. 💬 CommunicationSpecialist Agent - 사용자 커뮤니케이션")
-        print("   5. 🎛️  MasterOrchestrator - 중앙 집중식 Agent 조정")
-        print("   6. 🔗 CommunicationHub - Agent 간 메시지 라우팅")
+        print("   5. 🎛️  MasterOrchestrator - 중앙 집중식 Agent 조정 및 통신 관리")
         
     else:
         print(f"\\n⚠️ {total - passed}개 테스트 실패")

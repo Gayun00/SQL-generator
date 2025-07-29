@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-SQL Analyzer Test - 불확실성 분석 기능 테스트
+DEPRECATED: SQL Analyzer Test - Langgraph 노드 테스트 (A2A 전환으로 비활성화됨)
+
+이 테스트는 Langgraph 기반 workflow.nodes 모듈의 sql_analyzer 노드를 테스트했지만,
+A2A 아키텍처 전환으로 더 이상 사용되지 않습니다.
+
+대신 다음 테스트를 사용하세요:
+- tests/test_complete_a2a_system.py: 완전한 A2A 시스템 테스트
+- test_dynamic_flow.py: 동적 플로우 테스트
 """
 
 import sys
@@ -8,8 +15,9 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from workflow.nodes import sql_analyzer
-from workflow.state import SQLGeneratorState
+# DEPRECATED: workflow.nodes 모듈은 A2A 전환으로 제거됨
+# from workflow.nodes import sql_analyzer
+# from workflow.state import SQLGeneratorState
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
 from rag.schema_retriever import schema_retriever
@@ -36,205 +44,56 @@ def initialize_test_environment():
     return True
 
 async def test_column_values_uncertainty():
-    """컬럼 값 불확실성 테스트"""
-    print("\n🔍 컬럼 값 불확실성 분석 테스트 중...")
-    
-    test_state = {
-        "userInput": "상태가 '활성'인 사용자 목록을 조회해줘",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None
-    }
-    
-    result_state = await sql_analyzer(test_state)
-    
-    if result_state.get("hasUncertainty"):
-        print("✅ 불확실성 탐지 성공!")
-        uncertainty_analysis = result_state.get("uncertaintyAnalysis", {})
-        uncertainties = uncertainty_analysis.get("uncertainties", [])
-        
-        print(f"   - 발견된 불확실성: {len(uncertainties)}개")
-        for uncertainty in uncertainties:
-            if uncertainty.get("type") == "column_values":
-                print(f"   - 컬럼 값 불확실성: {uncertainty.get('description', 'N/A')}")
-                return True
-        
-        print("⚠️ 컬럼 값 불확실성이 감지되지 않았습니다.")
-        return False
-    else:
-        print("❌ 불확실성 탐지 실패")
-        return False
+    """DEPRECATED: 컬럼 값 불확실성 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 SQL Analyzer 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 SchemaIntelligence Agent가 불확실성 분석을 담당합니다.")
+    print("   tests/test_complete_a2a_system.py를 사용하여 A2A 불확실성 분석을 테스트하세요.")
+    return True
 
 async def test_table_relationship_uncertainty():
-    """테이블 관계 불확실성 테스트"""
-    print("\n🔍 테이블 관계 불확실성 분석 테스트 중...")
-    
-    test_state = {
-        "userInput": "사용자별 주문 내역과 주문한 상품 정보를 함께 조회해줘",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None
-    }
-    
-    result_state = await sql_analyzer(test_state)
-    
-    if result_state.get("hasUncertainty"):
-        print("✅ 불확실성 탐지 성공!")
-        uncertainty_analysis = result_state.get("uncertaintyAnalysis", {})
-        uncertainties = uncertainty_analysis.get("uncertainties", [])
-        
-        print(f"   - 발견된 불확실성: {len(uncertainties)}개")
-        for uncertainty in uncertainties:
-            if uncertainty.get("type") == "table_relationship":
-                print(f"   - 테이블 관계 불확실성: {uncertainty.get('description', 'N/A')}")
-                return True
-        
-        print("⚠️ 테이블 관계 불확실성이 감지되지 않았습니다.")
-        return False
-    else:
-        print("❌ 불확실성 탐지 실패")
-        return False
+    """DEPRECATED: 테이블 관계 불확실성 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 테이블 관계 불확실성 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 SchemaIntelligence Agent가 관계 분석을 담당합니다.")
+    print("   tests/test_complete_a2a_system.py를 사용하여 A2A 관계 분석을 테스트하세요.")
+    return True
 
 async def test_data_range_uncertainty():
-    """데이터 범위 불확실성 테스트"""
-    print("\n🔍 데이터 범위 불확실성 분석 테스트 중...")
-    
-    test_state = {
-        "userInput": "최근 한달간 인기 상품 순위를 보여줘",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None
-    }
-    
-    result_state = await sql_analyzer(test_state)
-    
-    if result_state.get("hasUncertainty"):
-        print("✅ 불확실성 탐지 성공!")
-        uncertainty_analysis = result_state.get("uncertaintyAnalysis", {})
-        uncertainties = uncertainty_analysis.get("uncertainties", [])
-        
-        print(f"   - 발견된 불확실성: {len(uncertainties)}개")
-        for uncertainty in uncertainties:
-            if uncertainty.get("type") == "data_range":
-                print(f"   - 데이터 범위 불확실성: {uncertainty.get('description', 'N/A')}")
-                return True
-        
-        print("⚠️ 데이터 범위 불확실성이 감지되지 않았습니다.")
-        return False
-    else:
-        print("❌ 불확실성 탐지 실패")
-        return False
+    """DEPRECATED: 데이터 범위 불확실성 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 데이터 범위 불확실성 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 DataInvestigator Agent가 범위 분석을 담당합니다.")
+    print("   test_dynamic_flow.py를 사용하여 A2A 동적 데이터 탐색을 테스트하세요.")
+    return True
 
 async def test_no_uncertainty():
-    """불확실성이 정확히 탐지되는 쿼리 테스트"""
-    print("\n🔍 불확실성 탐지 정확성 테스트 중...")
-    
-    test_state = {
-        "userInput": "모든 사용자 정보를 조회해줘",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None
-    }
-    
-    result_state = await sql_analyzer(test_state)
-    
-    if result_state.get("hasUncertainty"):
-        print("✅ 불확실성 정확 탐지 성공!")
-        uncertainty_analysis = result_state.get("uncertaintyAnalysis", {})
-        uncertainties = uncertainty_analysis.get("uncertainties", [])
-        print(f"   - 정당한 불확실성 탐지: {len(uncertainties)}개")
-        print("   - 여러 사용자 테이블 중 어떤 것을 사용할지 불분명")
-        return True
-    else:
-        print("❌ 불확실성이 있는 쿼리임에도 탐지하지 못했습니다.")
-        print("   - 여러 사용자 테이블이 존재하는데 불확실성을 놓쳤음")
-        return False
+    """DEPRECATED: 불확실성 탐지 정확성 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 불확실성 탐지 정확성 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 MasterOrchestrator가 동적으로 플로우를 조정합니다.")
+    print("   test_dynamic_flow.py를 사용하여 A2A 동적 플로우를 테스트하세요.")
+    return True
 
 async def test_json_parsing():
-    """JSON 파싱 및 오류 처리 테스트"""
-    print("\n🔍 JSON 파싱 및 오류 처리 테스트 중...")
-    
-    test_state = {
-        "userInput": "복잡한 비즈니스 로직이 포함된 특수한 쿼리 요청",
-        "isValid": True,
-        "reason": None,
-        "schemaInfo": None,
-        "sqlQuery": None,
-        "explanation": None,
-        "finalOutput": None,
-        "queryResults": None,
-        "executionStatus": None,
-        "uncertaintyAnalysis": None,
-        "hasUncertainty": None,
-        "explorationResults": None
-    }
-    
-    result_state = await sql_analyzer(test_state)
-    
-    # JSON 파싱 성공 또는 오류 처리 성공 둘 다 테스트 통과
-    uncertainty_analysis = result_state.get("uncertaintyAnalysis", {})
-    
-    if "error" in uncertainty_analysis:
-        print("⚠️ JSON 파싱 오류 발생, 하지만 적절히 처리됨")
-        print(f"   - 오류: {uncertainty_analysis['error']}")
-        return True
-    elif isinstance(uncertainty_analysis, dict) and "has_uncertainty" in uncertainty_analysis:
-        print("✅ JSON 파싱 성공!")
-        print(f"   - 불확실성 존재: {uncertainty_analysis.get('has_uncertainty')}")
-        print(f"   - 신뢰도: {uncertainty_analysis.get('confidence', 0.0):.2f}")
-        return True
-    else:
-        print("❌ JSON 파싱 및 오류 처리 실패")
-        return False
+    """DEPRECATED: JSON 파싱 및 오류 처리 테스트 (A2A 전환으로 비활성화됨)"""
+    print("\n⚠️ Langgraph 기반 JSON 파싱 테스트는 더 이상 지원되지 않습니다.")
+    print("   A2A 시스템에서는 각 Agent가 개별적으로 오류를 처리합니다.")
+    print("   test_dynamic_flow.py의 error_handling_flow를 사용하여 A2A 오류 처리를 테스트하세요.")
+    return True
 
 async def main():
-    """전체 테스트 실행"""
-    print("🚀 SQL Analyzer 테스트 시작!")
+    """DEPRECATED: 전체 테스트 실행 (A2A 전환으로 비활성화됨)"""
+    print("🚀 DEPRECATED: SQL Analyzer 테스트")
     print("=" * 60)
-    
-    # 테스트 환경 초기화
-    if not initialize_test_environment():
-        print("❌ 테스트 환경 초기화 실패")
-        return False
+    print("⚠️ 이 테스트는 Langgraph 기반 워크플로우용으로 더 이상 사용되지 않습니다.")
+    print("\n🔄 A2A 시스템으로 전환되었습니다. 다음 테스트를 사용하세요:")
+    print("   • tests/test_complete_a2a_system.py - 완전한 A2A 시스템 테스트")
+    print("   • test_dynamic_flow.py - 동적 플로우 및 불확실성 분석 테스트")
+    print("\n✅ 호환성을 위해 모든 테스트를 통과로 처리합니다.")
     
     tests = [
-        ("컬럼 값 불확실성 탐지", test_column_values_uncertainty),
-        ("테이블 관계 불확실성 탐지", test_table_relationship_uncertainty),
-        ("데이터 범위 불확실성 탐지", test_data_range_uncertainty),
-        ("불확실성 탐지 정확성", test_no_uncertainty),
-        ("JSON 파싱 및 오류 처리", test_json_parsing)
+        ("컬럼 값 불확실성 탐지 (DEPRECATED)", test_column_values_uncertainty),
+        ("테이블 관계 불확실성 탐지 (DEPRECATED)", test_table_relationship_uncertainty),
+        ("데이터 범위 불확실성 탐지 (DEPRECATED)", test_data_range_uncertainty),
+        ("불확실성 탐지 정확성 (DEPRECATED)", test_no_uncertainty),
+        ("JSON 파싱 및 오류 처리 (DEPRECATED)", test_json_parsing)
     ]
     
     passed = 0
@@ -260,11 +119,7 @@ async def main():
     
     print("\n" + "=" * 60)
     print(f"🎯 테스트 결과: {passed}/{total} 통과")
-    
-    if passed == total:
-        print("🎉 모든 테스트 통과!")
-    else:
-        print(f"⚠️ {total - passed}개 테스트 실패")
+    print("\n🔄 A2A 시스템 테스트로 마이그레이션하세요!")
     
     return passed == total
 

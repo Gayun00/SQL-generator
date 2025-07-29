@@ -1,60 +1,40 @@
+# =================================================================
+# DEPRECATED: 기존 Langgraph 워크플로우 (A2A 전환으로 비활성화됨)
+# =================================================================
+# 
+# 이 파일은 A2A (Agent-to-Agent) 아키텍처 전환으로 더 이상 사용되지 않습니다.
+# 대신 workflow/a2a_workflow.py를 사용하세요.
+#
+# 변경 이유:
+# - 고정된 플로우 → 동적 플로우
+# - Langgraph 의존성 제거 → 순수 A2A 아키텍처 
+# - Agent 결과 기반 플로우 조정 지원
+#
+# =================================================================
+
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from langgraph.graph import StateGraph, END
-from workflow.state import SQLGeneratorState
-from workflow.nodes import (
-    clarifier, wait_for_user, sql_generator, sql_executor, explainer, 
-    sql_analyzer, sql_explorer, sql_clarifier, user_clarification_input,
-    orchestrator, final_answer
-)
-
 def create_workflow():
-    """LangGraph 워크플로우 생성 및 구성"""
+    """
+    DEPRECATED: A2A 워크플로우로 전환됨
     
-    workflow = StateGraph(SQLGeneratorState)
+    호환성을 위해 유지되지만, 새로운 A2A 워크플로우 사용을 권장합니다.
+    """
+    import warnings
+    warnings.warn(
+        "create_workflow()는 더 이상 사용되지 않습니다. "
+        "workflow.a2a_workflow.create_a2a_workflow()를 사용하세요.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     
-    # 노드 추가
-    workflow.add_node("clarifier", clarifier)
-    workflow.add_node("wait_for_user", wait_for_user)
-    workflow.add_node("sql_analyzer", sql_analyzer)
-    workflow.add_node("sql_explorer", sql_explorer)
-    workflow.add_node("sql_generator", sql_generator)
-    workflow.add_node("sql_executor", sql_executor)
-    workflow.add_node("explainer", explainer)
-    workflow.add_node("sql_clarifier", sql_clarifier)
-    workflow.add_node("user_clarification_input", user_clarification_input)
-    workflow.add_node("final_answer", final_answer)
+    # 기존 코드와의 호환성을 위해 에러가 아닌 경고만 표시
+    print("⚠️ 경고: Langgraph 워크플로우는 비활성화되었습니다.")
+    print("💡 A2A 워크플로우 사용을 권장합니다: python workflow/a2a_workflow.py")
     
-    # 시작점 설정
-    workflow.set_entry_point("clarifier")
-    
-    # 조건부 엣지 추가 (Orchestrator 로직)  
-    edge_mapping = {
-        "wait_for_user": "wait_for_user",
-        "clarifier": "clarifier", 
-        "sql_analyzer": "sql_analyzer",
-        "sql_explorer": "sql_explorer",
-        "sql_generator": "sql_generator",
-        "sql_executor": "sql_executor",
-        "explainer": "explainer",
-        "sql_clarifier": "sql_clarifier",
-        "user_clarification_input": "user_clarification_input",
-        "final_answer": "final_answer"
-    }
-    
-    workflow.add_conditional_edges("clarifier", orchestrator, edge_mapping)
-    
-    # 모든 노드에 동일한 조건부 엣지 적용
-    for node_name in ["wait_for_user", "sql_analyzer", "sql_explorer", "sql_generator", 
-                      "sql_executor", "explainer", "sql_clarifier", "user_clarification_input"]:
-        workflow.add_conditional_edges(node_name, orchestrator, edge_mapping)
-    
-    # 종료점 설정
-    workflow.add_edge("final_answer", END)
-    
-    return workflow.compile()
+    raise NotImplementedError("A2A 워크플로우로 전환되었습니다. workflow/a2a_workflow.py를 사용하세요.")
 
 if __name__ == "__main__":
     import asyncio
