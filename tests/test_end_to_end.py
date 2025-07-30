@@ -49,7 +49,7 @@ async def test_simple_query_flow():
     
     try:
         print(f"📝 입력: {test_input}")
-        result = await workflow_manager.execute_workflow(test_input)
+        result = await workflow_manager.process_query(test_input)
         
         # 결과 검증
         success_checks = []
@@ -116,7 +116,7 @@ async def test_uncertain_query_flow():
     
     try:
         print(f"📝 입력: {test_input}")
-        result = await workflow_manager.execute_workflow(test_input)
+        result = await workflow_manager.process_query(test_input)
         
         # 결과 검증
         success_checks = []

@@ -34,7 +34,7 @@ async def test_specific_query():
     print(f"✅ 시스템 초기화 완료! ({len(schema_info)}개 테이블)")
     
     # A2A 워크플로우 생성
-    workflow_manager = create_a2a_workflow()
+    workflow_manager = await create_a2a_workflow()
     
     # 테스트 쿼리
     test_query = "최근 일주일 간 가장 많은 금액을 결제한 유저의 이름을 보여줘"
@@ -44,7 +44,7 @@ async def test_specific_query():
     
     try:
         # A2A 워크플로우 실행
-        result = await workflow_manager.execute_workflow(test_query)
+        result = await workflow_manager.process_query(test_query)
         
         print("\n" + "=" * 60)
         print("🎯 최종 결과:")

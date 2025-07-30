@@ -8,9 +8,10 @@ A2A (Agent-to-Agent) 워크플로우 - MasterOrchestrator 기반
 
 import sys
 import os
+from typing import List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agents.master_orchestrator import MasterOrchestrator, ExecutionContext
+from agents.dynamic_orchestrator import DynamicOrchestrator
 from agents.schema_intelligence_agent import create_schema_intelligence_agent
 from agents.query_architect_agent import create_query_architect_agent
 from agents.data_investigator_agent import create_data_investigator_agent
@@ -21,15 +22,15 @@ from rag.schema_retriever import schema_retriever
 
 
 class A2AWorkflow:
-    """A2A 워크플로우 관리 클래스"""
+    """완전 동적 A2A 워크플로우 관리 클래스"""
     
     def __init__(self):
         self.orchestrator = None
         self.initialized = False
     
     async def initialize(self):
-        """시스템 초기화"""
-        print("🔧 A2A 워크플로우 초기화 중...")
+        """완전 동적 시스템 초기화"""
+        print("🔧 완전 동적 A2A 워크플로우 초기화 중...")
         
         try:
             # 스키마 정보 초기화
@@ -48,8 +49,8 @@ class A2AWorkflow:
             
             print("✅ 스키마 검색기 초기화 완료")
             
-            # MasterOrchestrator 및 Agent 초기화
-            self.orchestrator = MasterOrchestrator()
+            # DynamicOrchestrator 및 Agent 초기화
+            self.orchestrator = DynamicOrchestrator()
             
             # 모든 Agent 등록
             agents = [
@@ -64,7 +65,7 @@ class A2AWorkflow:
                 print(f"✅ {agent.name} Agent 등록 완료")
             
             self.initialized = True
-            print("🎉 A2A 워크플로우 초기화 완료!")
+            print("🎉 완전 동적 A2A 워크플로우 초기화 완료!")
             return True
             
         except Exception as e:
@@ -84,49 +85,25 @@ class A2AWorkflow:
         if not self.initialized:
             raise Exception("A2A 워크플로우가 초기화되지 않았습니다.")
         
-        print(f"🚀 A2A 처리 시작: '{user_query}'")
+        print(f"🚀 완전 동적 A2A 처리 시작: '{user_query}'")
         print("-" * 60)
         
-        # ExecutionContext 생성
-        initial_state = {
-            "userInput": user_query,
-            "isValid": True,
-            "reason": None,
-            "schemaInfo": None,
-            "sqlQuery": None,
-            "explanation": None,
-            "finalOutput": None,
-            "queryResults": None,
-            "executionStatus": None,
-            "uncertaintyAnalysis": None,
-            "hasUncertainty": None,
-            "explorationResults": None,
-            "needsClarification": None,
-            "clarificationQuestions": None,
-            "clarificationSummary": None,
-            "userAnswers": None
-        }
-        
-        context = ExecutionContext(
-            query=user_query,
-            state=initial_state
-        )
-        
         try:
-            # MasterOrchestrator를 통한 동적 A2A 실행
-            result = await self.orchestrator.process_sql_request(context)
+            # DynamicOrchestrator를 통한 완전 동적 A2A 실행
+            result = await self.orchestrator.execute_dynamic_workflow(user_query)
             
-            print(f"✅ A2A 처리 완료! ({result.get('execution_time', 0):.2f}초)")
-            print(f"🎛️ 전략: {result.get('execution_plan', {}).get('strategy', 'unknown')}")
-            print(f"📊 단계: {len(result.get('execution_plan', {}).get('completed_phases', []))}개 완료")
+            print(f"✅ 완전 동적 A2A 처리 완료! ({result.get('execution_time', 0):.2f}초)")
+            print(f"🎛️ 완료 유형: {result.get('completion_type', 'unknown')}")
+            print(f"📊 실행된 Agent: {len(result.get('executed_agents', []))}개")
+            print(f"🔄 반복 횟수: {result.get('iterations', 0)}회")
             
-            if result.get('execution_plan', {}).get('early_completion'):
-                print("⚡ 조기 완료 - 불필요한 단계 스킵됨")
+            if result.get('iterations', 0) < 5:
+                print("⚡ 효율적인 동적 실행 - 최소한의 Agent만 사용됨")
             
             return result
             
         except Exception as e:
-            print(f"❌ A2A 처리 실패: {str(e)}")
+            print(f"❌ 완전 동적 A2A 처리 실패: {str(e)}")
             raise
     
     def get_system_status(self) -> dict:
@@ -135,6 +112,13 @@ class A2AWorkflow:
             return {"status": "not_initialized"}
         
         return self.orchestrator.get_system_status()
+    
+    def get_available_agents(self) -> List[str]:
+        """등록된 Agent 목록 반환 (편의 메서드)"""
+        if not self.initialized:
+            return []
+        
+        return self.orchestrator.get_available_agents()
     
     async def shutdown(self):
         """시스템 종료"""
@@ -145,18 +129,18 @@ class A2AWorkflow:
 
 # 편의 함수들
 async def create_a2a_workflow():
-    """A2A 워크플로우 생성 및 초기화"""
+    """완전 동적 A2A 워크플로우 생성 및 초기화"""
     workflow = A2AWorkflow()
     success = await workflow.initialize()
     
     if not success:
-        raise Exception("A2A 워크플로우 초기화 실패")
+        raise Exception("완전 동적 A2A 워크플로우 초기화 실패")
     
     return workflow
 
 
 async def process_single_query(user_query: str) -> dict:
-    """단일 쿼리 처리 (편의 함수)"""
+    """단일 쿼리 완전 동적 처리 (편의 함수)"""
     workflow = await create_a2a_workflow()
     try:
         result = await workflow.process_query(user_query)
@@ -172,12 +156,14 @@ if __name__ == "__main__":
         """대화형 모드"""
         workflow = await create_a2a_workflow()
         
-        print("\n🚀 A2A SQL Generator 시작!")
+        print("\n🚀 완전 동적 A2A SQL Generator 시작!")
         print("=" * 60)
-        print("💡 특징: Agent 결과에 따라 동적으로 플로우가 조정됩니다")
-        print("   • 불확실성 없음 → 탐색 단계 스킵")
-        print("   • SQL 첫 실행 성공 → 조기 완료")
-        print("   • 실행 실패 → 자동 개선 단계 추가")
+        print("💡 완전 동적 특징: Agent 결과에 따라 실시간으로 다음 Agent 결정")
+        print("   • 첫 Agent 실행 → 결과 분석 → 다음 필요 Agent 동적 선택")
+        print("   • 불확실성 없음 → 탐색 Agent 완전 스킵")
+        print("   • SQL 실행 성공 → 즉시 완료 (추가 Agent 실행 안함)")
+        print("   • 실행 실패 → 필요한 개선 Agent만 동적 추가")
+        print("   • 최소한의 Agent만 사용하여 최대 효율성 달성")
         print("=" * 60)
         
         try:
@@ -185,7 +171,7 @@ if __name__ == "__main__":
                 user_input = input("\n💬 SQL 생성 요청: ").strip()
                 
                 if user_input.lower() in ['quit', 'exit', '종료']:
-                    print("👋 A2A 워크플로우를 종료합니다.")
+                    print("👋 완전 동적 A2A 워크플로우를 종료합니다.")
                     break
                 
                 if not user_input:
@@ -197,40 +183,41 @@ if __name__ == "__main__":
                     
                     # 결과 출력
                     print("\n" + "=" * 60)
-                    print("🎯 A2A 실행 결과:")
+                    print("🎯 완전 동적 A2A 실행 결과:")
                     
                     if result.get("success"):
-                        execution_plan = result.get("execution_plan", {})
-                        print(f"✅ 성공 ({execution_plan.get('strategy', 'unknown')} 전략)")
-                        print(f"📊 완료된 단계: {', '.join(execution_plan.get('completed_phases', []))}")
+                        completion_type = result.get("completion_type", "unknown")
+                        executed_agents = result.get("executed_agents", [])
+                        iterations = result.get("iterations", 0)
                         
-                        if execution_plan.get('early_completion'):
-                            print("⚡ 조기 완료됨 - 효율적인 처리!")
+                        print(f"✅ 성공 ({completion_type} 완료)")
+                        print(f"📊 실행된 Agent: {', '.join(executed_agents)}")
+                        print(f"🔄 동적 반복: {iterations}회")
                         
-                        # Agent 결과 요약
-                        results = result.get("results", {})
-                        for phase_name, phase_result in results.items():
-                            print(f"\n📋 {phase_name}:")
-                            for task_name, task_result in phase_result.items():
-                                if isinstance(task_result, dict):
-                                    status = "✅" if not task_result.get("error") else "❌"
-                                    print(f"   {task_name}: {status}")
-                                    
-                                    # 중요 정보 표시
-                                    if task_name == "full_analysis" and task_result.get("uncertainty_analysis"):
-                                        ua = task_result["uncertainty_analysis"]
-                                        print(f"      불확실성: {ua.get('has_uncertainty', False)}")
-                                        print(f"      신뢰도: {ua.get('confidence', 0):.2f}")
-                                    
-                                    elif "sql_query" in task_result:
-                                        sql = task_result.get("sql_query", "")
-                                        print(f"      SQL: {sql[:50]}{'...' if len(sql) > 50 else ''}")
-                                        
-                                        if task_result.get("query_result", {}).get("success"):
-                                            rows = task_result["query_result"].get("returned_rows", 0)
-                                            print(f"      실행 결과: {rows}개 행")
+                        if iterations <= 3:
+                            print("⚡ 매우 효율적! 최소한의 Agent로 완료됨")
+                        elif iterations <= 5:
+                            print("✨ 효율적! 적절한 수의 Agent 사용됨")
+                        
+                        # 최종 결과 표시
+                        final_result = result.get("final_result", {})
+                        if final_result.get("sql_query"):
+                            sql = final_result["sql_query"]
+                            print(f"\n📋 생성된 SQL: {sql[:80]}{'...' if len(sql) > 80 else ''}")
+                            
+                            if final_result.get("execution_result", {}).get("success"):
+                                rows = final_result["execution_result"].get("returned_rows", 0)
+                                print(f"📊 실행 결과: {rows}개 행 반환")
+                        
+                        # 실행 히스토리 간단 표시
+                        execution_history = result.get("execution_history", [])
+                        if execution_history:
+                            agent_flow = " → ".join([h["agent_name"] for h in execution_history])
+                            print(f"🔄 Agent 플로우: {agent_flow}")
                     else:
                         print(f"❌ 실패: {result.get('error', 'Unknown error')}")
+                        if result.get("executed_agents"):
+                            print(f"📊 시도된 Agent: {', '.join(result['executed_agents'])}")
                     
                 except Exception as e:
                     print(f"❌ 처리 중 오류: {str(e)}")
@@ -239,7 +226,7 @@ if __name__ == "__main__":
             await workflow.shutdown()
     
     async def test_mode():
-        """테스트 모드"""
+        """완전 동적 테스트 모드"""
         test_queries = [
             "users 테이블의 모든 데이터를 보여줘",
             "최근 일주일간 가장 많은 금액을 결제한 유저 상위 5명을 보여줘",
@@ -249,22 +236,43 @@ if __name__ == "__main__":
         workflow = await create_a2a_workflow()
         
         try:
+            total_agents_used = 0
+            total_iterations = 0
+            
             for i, query in enumerate(test_queries, 1):
-                print(f"\n🧪 테스트 {i}: {query}")
+                print(f"\n🧪 완전 동적 테스트 {i}: {query}")
                 print("=" * 60)
                 
                 result = await workflow.process_query(query)
                 
                 if result.get("success"):
-                    strategy = result.get("execution_plan", {}).get("strategy", "unknown")
-                    phases = result.get("execution_plan", {}).get("completed_phases", [])
-                    early = result.get("execution_plan", {}).get("early_completion", False)
+                    completion_type = result.get("completion_type", "unknown")
+                    executed_agents = result.get("executed_agents", [])
+                    iterations = result.get("iterations", 0)
                     
-                    print(f"✅ 성공 - {strategy} 전략, {len(phases)}단계")
-                    if early:
-                        print("⚡ 조기 완료!")
+                    total_agents_used += len(executed_agents)
+                    total_iterations += iterations
+                    
+                    print(f"✅ 성공 - {completion_type} 완료")
+                    print(f"📊 사용된 Agent: {len(executed_agents)}개 ({', '.join(executed_agents)})")
+                    print(f"🔄 동적 반복: {iterations}회")
+                    
+                    if iterations <= 3:
+                        print("⚡ 매우 효율적인 동적 실행!")
+                    
+                    # Agent 플로우 표시
+                    execution_history = result.get("execution_history", [])
+                    if execution_history:
+                        agent_flow = " → ".join([h["agent_name"] for h in execution_history])
+                        print(f"🔄 실행 플로우: {agent_flow}")
                 else:
                     print(f"❌ 실패: {result.get('error')}")
+            
+            # 전체 통계
+            print(f"\n📊 완전 동적 실행 통계:")
+            print(f"   평균 Agent 사용: {total_agents_used / len(test_queries):.1f}개")
+            print(f"   평균 반복 횟수: {total_iterations / len(test_queries):.1f}회")
+            print(f"   효율성: {'매우 우수' if total_iterations / len(test_queries) <= 3 else '우수' if total_iterations / len(test_queries) <= 5 else '보통'}")
                 
         finally:
             await workflow.shutdown()

@@ -54,7 +54,7 @@ async def main():
             return
         
         # A2A 워크플로우 생성 및 실행
-        workflow_manager = create_a2a_workflow()
+        workflow_manager = await create_a2a_workflow()
         
         print("\n🚀 SQL Generator A2A 워크플로우 시작!")
         print("💡 사용 가능한 명령:")
@@ -79,7 +79,7 @@ async def main():
             
             try:
                 # A2A 워크플로우 실행
-                result = await workflow_manager.execute_workflow(user_input)
+                result = await workflow_manager.process_query(user_input)
                 
                 print("\n" + "=" * 60)
                 print("🎯 처리 결과:")
