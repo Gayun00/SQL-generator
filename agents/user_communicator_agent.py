@@ -118,17 +118,18 @@ class UserCommunicatorAgent(BaseAgent):
             
             # 작업 타입에 따른 처리
             task_type = message.content.get("task_type", "generate_clarification")
+            input_data = message.content.get("input_data", {})
             
             if task_type == "generate_clarification":
-                result = await self._generate_clarification(message.content)
+                result = await self._generate_clarification(input_data)
             elif task_type == "validate_input":
-                result = await self._validate_input(message.content)
+                result = await self._validate_input(input_data)
             elif task_type == "explain_result":
-                result = await self._explain_result(message.content)
+                result = await self._explain_result(input_data)
             elif task_type == "process_feedback":
-                result = await self._process_feedback(message.content)
+                result = await self._process_feedback(input_data)
             else:
-                result = await self._generate_clarification(message.content)  # 기본값
+                result = await self._generate_clarification(input_data)  # 기본값
             
             # 성공 응답 생성
             return self.create_response_message(message, result)

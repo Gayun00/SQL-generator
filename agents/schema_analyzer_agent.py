@@ -96,17 +96,18 @@ class SchemaAnalyzerAgent(BaseAgent):
             
             # 작업 타입에 따른 처리
             task_type = message.content.get("task_type", "full_analysis")
+            input_data = message.content.get("input_data", {})
             
             if task_type == "quick_analysis":
-                result = await self._quick_analysis(message.content)
+                result = await self._quick_analysis(input_data)
             elif task_type == "full_analysis":
-                result = await self._full_analysis(message.content)
+                result = await self._full_analysis(input_data)
             elif task_type == "deep_analysis":
-                result = await self._deep_analysis(message.content)
+                result = await self._deep_analysis(input_data)
             elif task_type == "validation_review":
-                result = await self._validation_review(message.content)
+                result = await self._validation_review(input_data)
             else:
-                result = await self._full_analysis(message.content)  # 기본값
+                result = await self._full_analysis(input_data)  # 기본값
             
             # 성공 응답 생성
             return self.create_response_message(message, result)

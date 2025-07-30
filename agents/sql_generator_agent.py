@@ -57,7 +57,7 @@ class SQLGeneratorAgent(BaseAgent):
             "avg_generation_time": 0.0
         }
         
-        logger.info(f"QueryArchitect Agent initialized with specialization: {self.specialization}")
+        logger.info(f"SqlGenerator Agent initialized with specialization: {self.specialization}")
     
     def get_system_prompt(self) -> str:
         """SQL 생성 전문 시스템 프롬프트"""
@@ -110,19 +110,20 @@ class SQLGeneratorAgent(BaseAgent):
             
             # 작업 타입에 따른 처리
             task_type = message.content.get("task_type", "generate_sql")
+            input_data = message.content.get("input_data", {})
             
             if task_type == "generate_sql":
-                result = await self._optimized_generation(message.content)
+                result = await self._optimized_generation(input_data)
             elif task_type == "execute_with_improvements":
-                result = await self._execute_with_improvements(message.content)
+                result = await self._execute_with_improvements(input_data)
             else:
-                result = await self._optimized_generation(message.content)  # 기본값
+                result = await self._optimized_generation(input_data)  # 기본값
             
             # 성공 응답 생성
             return self.create_response_message(message, result)
             
         except Exception as e:
-            logger.error(f"QueryArchitect Agent processing failed: {str(e)}")
+            logger.error(f"SqlGenerator Agent processing failed: {str(e)}")
             return self.create_error_message(message, e)
     
 
@@ -133,7 +134,7 @@ class SQLGeneratorAgent(BaseAgent):
         analysis_result = input_data.get("analysis_result", {})
         exploration_result = input_data.get("exploration_result", {})
         
-        logger.info(f"QueryArchitect: Optimized generation started")
+        logger.info(f"SqlGenerator: Optimized generation started")
         
         # 확장된 RAG 검색
         try:
@@ -370,7 +371,7 @@ class SQLGeneratorAgent(BaseAgent):
         sql_query = input_data.get("sql_query", "")
         original_query = input_data.get("original_query", "")
         
-        logger.info("QueryArchitect: Execute with improvements started")
+        logger.info("SqlGenerator: Execute with improvements started")
         
         if not sql_query:
             return {
@@ -394,6 +395,9 @@ class SQLGeneratorAgent(BaseAgent):
                 # 성공시 바로 반환
                 print(f"✅ SQL 실행 성공! ({processing_time:.2f}초)")
                 print(f"📊 결과: {query_result['returned_rows']}개 행 반환")
+                
+                # 실행 결과 상세 출력
+                self._print_query_results(query_result)
                 
                 return {
                     "execution_type": "execute_with_improvements",
@@ -664,6 +668,9 @@ class SQLGeneratorAgent(BaseAgent):
                 print(f"✅ 개선된 쿼리 실행 성공! ({processing_time:.2f}초)")
                 print(f"📊 결과: {query_result['returned_rows']}개 행 반환")
                 
+                # 실행 결과 상세 출력
+                self._print_query_results(query_result)
+                
                 # 성공 통계 업데이트
                 self.performance_stats["optimization_applied"] += 1
                 
@@ -755,6 +762,47 @@ class SQLGeneratorAgent(BaseAgent):
             "avg_generation_time": round(self.performance_stats["avg_generation_time"], 3),
             "performance_grade": "A" if optimization_rate > 70 and self.performance_stats["avg_generation_time"] < 2.0 else "B"
         }
+
+    def _print_query_results(self, query_result: Dict[str, Any]):
+        """쿼리 실행 결과를 보기 좋게 출력"""
+        try:
+            # 기본 정보 출력
+            print(f"\n📋 쿼리 실행 정보:")
+            print(f"   - 반환된 행 수: {query_result.get('returned_rows', 0)}개")
+            print(f"   - 처리된 바이트: {query_result.get('total_bytes_processed', 0):,} bytes")
+            print(f"   - 실행 시간: {query_result.get('execution_time', 0):.2f}초")
+            
+            # 실제 데이터 출력
+            if 'data' in query_result and query_result['data']:
+                data = query_result['data']
+                print(f"\n📊 쿼리 결과 데이터:")
+                print("=" * 80)
+                
+                # 컬럼명 출력
+                if data and len(data) > 0:
+                    columns = list(data[0].keys())
+                    header = " | ".join(f"{col:<20}" for col in columns)
+                    print(f"   {header}")
+                    print("   " + "-" * len(header))
+                    
+                    # 데이터 행 출력 (최대 10개)
+                    max_rows = min(10, len(data))
+                    for i, row in enumerate(data[:max_rows]):
+                        row_str = " | ".join(f"{str(val):<20}" for val in row.values())
+                        print(f"   {row_str}")
+                    
+                    if len(data) > max_rows:
+                        print(f"   ... (총 {len(data)}개 행 중 {max_rows}개만 표시)")
+                
+                print("=" * 80)
+            
+            # 오류가 있는 경우
+            if 'error' in query_result and query_result['error']:
+                print(f"\n⚠️  경고: {query_result['error']}")
+                
+        except Exception as e:
+            print(f"❌ 결과 출력 중 오류: {str(e)}")
+            print(f"📊 원본 결과: {query_result}")
 
 # Agent 생성 헬퍼 함수
 def create_sql_generator_agent(custom_config: Optional[Dict[str, Any]] = None) -> SQLGeneratorAgent:
