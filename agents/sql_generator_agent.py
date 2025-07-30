@@ -307,18 +307,50 @@ class SQLGeneratorAgent(BaseAgent):
         return context
     
     def _clean_sql_response(self, response_content: str) -> str:
-        """SQL 응답 정리"""
-        sql_query = response_content.strip()
+        """SQL 응답 정리 - 코드 블록에서 SQL만 추출"""
+        # import re는 파일 상단에서 이미 했으므로 제거
         
-        # 코드 블록 제거
-        if sql_query.startswith("```sql"):
-            sql_query = sql_query[6:]
-        if sql_query.startswith("```"):
-            sql_query = sql_query[3:]
-        if sql_query.endswith("```"):
-            sql_query = sql_query[:-3]
+        # ```sql ... ``` 패턴 찾기
+        sql_pattern = r'```sql\s*(.*?)\s*```'
+        match = re.search(sql_pattern, response_content, re.DOTALL | re.IGNORECASE)
         
-        return sql_query.strip()
+        if match:
+            # 코드 블록 안의 SQL 추출
+            sql_query = match.group(1).strip()
+            return sql_query
+        
+        # ``` ... ``` 패턴 찾기 (sql 없이)
+        code_pattern = r'```\s*(.*?)\s*```'
+        match = re.search(code_pattern, response_content, re.DOTALL)
+        
+        if match:
+            # 코드 블록 안의 내용 추출
+            sql_query = match.group(1).strip()
+            return sql_query
+        
+        # 코드 블록이 없으면 전체 내용에서 SQL 추출
+        # SELECT로 시작하는 첫 번째 라인부터 찾기
+        lines = response_content.split('\n')
+        sql_lines = []
+        found_sql = False
+        
+        for line in lines:
+            line_stripped = line.strip()
+            if not line_stripped:
+                continue
+                
+            # SQL 시작 키워드 감지
+            if line_stripped.upper().startswith(('SELECT', 'WITH', 'CREATE', 'INSERT', 'UPDATE', 'DELETE')):
+                found_sql = True
+                sql_lines.append(line)
+            elif found_sql:
+                sql_lines.append(line)
+        
+        if sql_lines:
+            return '\n'.join(sql_lines).strip()
+        
+        # 아무것도 찾지 못하면 원본 반환
+        return response_content.strip()
     
     def _assess_query_complexity(self, sql_query: str) -> str:
         """쿼리 복잡도 평가"""

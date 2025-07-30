@@ -13,6 +13,7 @@ import asyncio
 import logging
 from datetime import datetime
 import json
+import re
 
 from .base_agent import BaseAgent, AgentMessage, MessageType, AgentStatus
 from workflow.state import SQLGeneratorState
@@ -144,11 +145,11 @@ class AgentResultAnalyzer:
             "rag_context": analysis_result.get("rag_context")  # RAG 결과 전달
         })
         
-        # 불확실성이 있고 신뢰도가 낮으면 탐색 필요
-        if has_uncertainty and confidence < 0.7:
+        # 더 많은 경우에 DataExplorer 실행
+        if has_uncertainty or confidence < 0.8:
             suggestions.append(NextAgentSuggestion(
                 agent_name="data_explorer",
-                task_type="explore_uncertainties",
+                task_type="uncertainty_exploration",
                 priority=1,
                 reason=f"Uncertainties detected (confidence: {confidence:.2f})",
                 input_data={
@@ -211,10 +212,12 @@ class AgentResultAnalyzer:
         """DataExplorer 결과 분석"""
         suggestions = []
         
+        # 실제 DataExplorer 결과 구조에 맞게 수정
         exploration_result = (
             result_data.get("explore_uncertainties") or
             result_data.get("quick_exploration") or
-            {}
+            result_data.get("uncertainty_exploration") or  # ← 추가
+            result_data  # ← 전체 결과를 exploration_result로 사용
         )
         
         if exploration_result.get("error"):
@@ -233,9 +236,11 @@ class AgentResultAnalyzer:
             ))
             return suggestions
         
-        successful_explorations = exploration_result.get("successful_queries", 0)
+        # DataExplorer의 실제 결과 구조에 맞게 수정
+        successful_explorations = exploration_result.get("executed_queries", 0)  # ← 수정
         insights = exploration_result.get("insights", [])
         resolved_uncertainties = exploration_result.get("resolved_uncertainties", [])
+        resolution_success = exploration_result.get("resolution_success", False)  # ← 추가
         
         # 탐색 결과를 누적 인사이트에 추가
         context.accumulated_insights.update({
@@ -244,50 +249,26 @@ class AgentResultAnalyzer:
             "data_insights": insights
         })
         
-        # 성공적인 탐색 결과가 있으면 SQL 생성으로 진행
-        if successful_explorations > 0 and len(insights) > 0:
+        # 성공적인 탐색 결과가 있으면 SQL 생성으로 진행 (조건 완화)
+        if resolution_success or successful_explorations > 0:  # ← 수정: insights 조건 제거, 실행된 쿼리가 있으면 진행
+            logger.info(f"DataExplorer completed: resolution_success={resolution_success}, executed_queries={successful_explorations}, insights={len(insights)}")
             suggestions.append(NextAgentSuggestion(
                 agent_name="sql_generator",
                 task_type="generate_sql",
                 priority=1,
-                reason=f"Exploration successful ({successful_explorations} queries, {len(insights)} insights)",
+                reason=f"Exploration completed ({successful_explorations} queries executed, proceeding to SQL generation)",
                 input_data={
                     "schema_analysis": context.accumulated_insights.get("schema_analysis"),
                     "exploration_results": exploration_result,
                     "query": context.query,
                     "context": context.accumulated_insights,
-                    "rag_context": context.accumulated_insights.get("rag_context")  # RAG 컨텍스트 전달
+                    "rag_context": context.accumulated_insights.get("rag_context")
                 },
                 required=True
             ))
         
-        # 탐색이 부분적으로만 성공했으면 추가 탐색 또는 설명 요청
-        elif successful_explorations > 0 and len(insights) == 0:
-            suggestions.extend([
-                NextAgentSuggestion(
-                    agent_name="data_explorer",
-                    task_type="deep_exploration",
-                    priority=2,
-                    reason="Partial success, deeper exploration needed",
-                    input_data={
-                        "previous_results": exploration_result,
-                        "query": context.query
-                    }
-                ),
-                NextAgentSuggestion(
-                    agent_name="user_communicator",
-                    task_type="generate_clarification",
-                    priority=3,
-                    reason="Alternative: ask user for clarification",
-                    input_data={
-                        "partial_exploration": exploration_result,
-                        "query": context.query
-                    }
-                )
-            ])
-        
         # 탐색이 완전히 실패했으면 사용자 설명 필요
-        else:
+        elif not resolution_success and successful_explorations == 0:
             suggestions.append(NextAgentSuggestion(
                 agent_name="user_communicator",
                 task_type="generate_clarification",
@@ -304,11 +285,50 @@ class AgentResultAnalyzer:
         return suggestions
     
     @staticmethod
+    def _validate_sql_completeness(sql_query: str) -> Dict[str, Any]:
+        """강화된 SQL 완성도 및 유효성 검증"""
+        if not sql_query:
+            return {"is_valid": False, "reason": "empty_sql"}
+        
+        sql_clean = sql_query.strip()
+        sql_upper = sql_clean.upper()
+        
+        # 1. 기본 SQL 구조 검증
+        if not sql_upper.startswith(('SELECT', 'WITH', 'CREATE', 'INSERT', 'UPDATE', 'DELETE')):
+            return {"is_valid": False, "reason": "invalid_start"}
+        
+        # 4. 괄호 균형 검사
+        open_parens = sql_clean.count('(')
+        close_parens = sql_clean.count(')')
+        if open_parens != close_parens:
+            return {"is_valid": False, "reason": "unbalanced_parentheses"}
+        
+        # 5. 필수 SQL 절 검증
+        required_clauses = {
+            'SELECT': r'\bSELECT\b',
+            'FROM': r'\bFROM\b'
+        }
+        
+        # 7. BigQuery 특화 검증
+        # 백틱이 있는 테이블명이 올바른 형식인지 확인
+        backtick_pattern = r'`[^`]+`'
+        backticks = re.findall(backtick_pattern, sql_clean)
+        for backtick in backticks:
+            if not re.match(r'`[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+`', backtick):
+                return {"is_valid": False, "reason": "invalid_table_format"}
+        
+        # 8. 토큰 제한 검증 (너무 긴 쿼리는 잘린 것으로 간주)
+        if len(sql_clean) > 2000:  # BigQuery 쿼리 길이 제한
+            return {"is_valid": False, "reason": "query_too_long"}
+        
+        return {"is_valid": True, "reason": "valid"}
+    
+    @staticmethod
     def _analyze_sql_generator_result(
         result_data: Dict[str, Any], 
         context: ExecutionContext
     ) -> List[NextAgentSuggestion]:
-        """SQLGenerator 결과 분석"""
+        """SQLGenerator 결과 분석 - 강화된 검증"""
         suggestions = []
         
         # SqlGenerator 결과는 직접 result_data에 포함됨
@@ -316,7 +336,7 @@ class AgentResultAnalyzer:
         
         # 디버깅: SqlGenerator 결과 로깅
         logger.info(f"SqlGenerator result keys: {list(result_data.keys())}")
-        logger.info(f"SQL query: {result_data.get('sql_query', 'None')[:100] if result_data.get('sql_query') else 'None'}")
+        logger.info(f"SQL query: {result_data.get('sql_query', 'None') if result_data.get('sql_query') else 'None'}")
         
         # SQL 실행 결과가 있으면 표로 출력
         if 'query_result' in result_data and result_data['query_result']:
@@ -357,7 +377,7 @@ class AgentResultAnalyzer:
                         "error_message": error_msg,
                         "original_query": context.query,
                         "context": context.accumulated_insights,
-                        "rag_context": context.accumulated_insights.get("rag_context")  # RAG 컨텍스트 전달
+                        "rag_context": context.accumulated_insights.get("rag_context")
                     },
                     required=True
                 ))
@@ -366,23 +386,64 @@ class AgentResultAnalyzer:
         sql_query = generation_result.get("sql_query", "")
         execution_result = generation_result.get("query_result", {})
         
-        # SQL이 유효한지 확인 (SELECT로 시작하는지 등)
-        if not sql_query or not sql_query.strip().upper().startswith(('SELECT', 'WITH')):
-            logger.info(f"Invalid SQL generated: {sql_query[:200] if sql_query else 'None'}")
-            # SQL이 제대로 생성되지 않음 - 커뮤니케이션으로 처리
-            context.completion_criteria_met.add("sql_generation_failed")
-            suggestions.append(NextAgentSuggestion(
-                agent_name="user_communicator",
-                task_type="generate_error_explanation",
-                priority=1,
-                reason="SQL query generation failed or invalid",
-                input_data={
-                    "error": f"Generated content is not a valid SQL query: {sql_query[:100] if sql_query else 'None'}",
-                    "query": context.query,
-                    "context": context.accumulated_insights
-                },
-                required=True
-            ))
+        # 강화된 SQL 유효성 검증
+        sql_validation = AgentResultAnalyzer._validate_sql_completeness(sql_query)
+        if not sql_validation["is_valid"]:
+            logger.info(f"Invalid SQL detected: {sql_validation['reason']}")
+            logger.info(f"SQL content: {sql_query if sql_query else 'None'}")
+            
+            # SQL 잘림이나 불완전함이 감지되면 재시도 제안
+            if sql_validation["reason"] in ["incomplete_sql", "truncated_sql", "incomplete_sentence"]:
+                # 재시도 횟수 확인
+                retry_count = context.accumulated_insights.get("sql_retry_count", 0)
+                if retry_count < 2:  # 최대 2번 재시도
+                    context.accumulated_insights["sql_retry_count"] = retry_count + 1
+                    suggestions.append(NextAgentSuggestion(
+                        agent_name="sql_generator",
+                        task_type="generate_sql", 
+                        priority=1,
+                        reason=f"SQL generation failed: {sql_validation['reason']}, retry {retry_count + 1}/2",
+                        input_data={
+                            "query": context.query,
+                            "context": context.accumulated_insights,
+                            "rag_context": context.accumulated_insights.get("rag_context"),
+                            "retry_mode": "simple",  # 간소화된 모드로 재시도
+                            "previous_sql": sql_query,  # 이전 SQL 전달
+                            "validation_error": sql_validation["reason"]
+                        },
+                        required=True
+                    ))
+                else:
+                    # 재시도 횟수 초과 시 사용자 도움 요청
+                    context.completion_criteria_met.add("sql_generation_failed")
+                    suggestions.append(NextAgentSuggestion(
+                        agent_name="user_communicator",
+                        task_type="generate_error_explanation",
+                        priority=1,
+                        reason="SQL generation failed after multiple retries",
+                        input_data={
+                            "error": f"SQL generation failed after {retry_count} retries: {sql_validation['reason']}",
+                            "query": context.query,
+                            "attempted_sql": sql_query,
+                            "context": context.accumulated_insights
+                        },
+                        required=True
+                    ))
+            else:
+                # 다른 유형의 오류는 커뮤니케이션으로 처리
+                context.completion_criteria_met.add("sql_generation_failed")
+                suggestions.append(NextAgentSuggestion(
+                    agent_name="user_communicator",
+                    task_type="generate_error_explanation",
+                    priority=1,
+                    reason="SQL query generation failed or invalid",
+                    input_data={
+                        "error": f"Generated content is not a valid SQL query: {sql_validation['reason']}",
+                        "query": context.query,
+                        "context": context.accumulated_insights
+                    },
+                    required=True
+                ))
             return suggestions
         
         # SQL이 성공적으로 실행됨
@@ -394,34 +455,25 @@ class AgentResultAnalyzer:
                 "query_explanation": generation_result.get("explanation")
             })
             
-            # 결과가 만족스러우면 완료, 아니면 커뮤니케이션 체크
+            # 결과가 만족스러우면 바로 완료 (추가 Agent 제안하지 않음)
             returned_rows = execution_result.get("returned_rows", 0)
             if returned_rows > 0:
-                # 성공적인 결과 - 바로 완료 가능
-                # 선택적으로 커뮤니케이션 체크 제안
-                suggestions.append(NextAgentSuggestion(
-                    agent_name="user_communicator",
-                    task_type="final_review",
-                    priority=4,  # 낮은 우선순위 (선택사항)
-                    reason=f"SQL executed successfully ({returned_rows} rows), optional final review",
-                    input_data={
-                        "sql_query": sql_query,
-                        "execution_result": execution_result,
-                        "original_query": context.query
-                    }
-                ))
+                # 성공적인 결과 - 바로 완료, 추가 Agent 제안하지 않음
+                logger.info(f"SQL execution successful with {returned_rows} rows. Workflow should complete.")
+                # suggestions를 추가하지 않아서 워크플로우가 자연스럽게 종료됨
             else:
-                # 결과가 없음 - 확인 필요
+                # 결과가 없는 경우에만 사용자 설명 필요
                 suggestions.append(NextAgentSuggestion(
                     agent_name="user_communicator",
                     task_type="empty_result_explanation",
-                    priority=2,
-                    reason="SQL executed but returned no rows",
+                    priority=1,  # 높은 우선순위 (필수)
+                    reason="SQL executed but returned no rows - needs explanation",
                     input_data={
                         "sql_query": sql_query,
                         "execution_result": execution_result,
                         "original_query": context.query
-                    }
+                    },
+                    required=True
                 ))
         
         # SQL 실행 실패
@@ -441,7 +493,7 @@ class AgentResultAnalyzer:
                         "error_message": error_message,
                         "original_query": context.query,
                         "context": context.accumulated_insights,
-                        "rag_context": context.accumulated_insights.get("rag_context")  # RAG 컨텍스트 전달
+                        "rag_context": context.accumulated_insights.get("rag_context")
                     },
                     required=True
                 ))
@@ -562,8 +614,24 @@ class AgentResultAnalyzer:
                 }
             })
         
-        # 기본 완료 조건: 최소 2개 Agent가 실행되고 더 이상 제안이 없으면 완료
-        elif len(context.executed_agents) >= 2:
+        # 기본 완료 조건: SQLGenerator가 실행되고 성공적인 결과가 있으면 완료
+        elif ("sql_generator" in context.executed_agents and 
+              context.accumulated_insights.get("final_sql") and 
+              context.accumulated_insights.get("execution_result", {}).get("success")):
+            completion_status.update({
+                "should_terminate": True,
+                "termination_reason": "sql_generation_successful",
+                "reason": "SQL successfully generated and executed",
+                "final_result": {
+                    "sql_query": context.accumulated_insights.get("final_sql"),
+                    "execution_result": context.accumulated_insights.get("execution_result"),
+                    "explanation": context.accumulated_insights.get("query_explanation"),
+                    "insights": context.accumulated_insights.get("data_insights", [])
+                }
+            })
+        
+        # 대체 완료 조건: 최소 3개 Agent가 실행되고 더 이상 제안이 없으면 완료
+        elif len(context.executed_agents) >= 3:
             completion_status.update({
                 "should_terminate": True,
                 "termination_reason": "workflow_completed",

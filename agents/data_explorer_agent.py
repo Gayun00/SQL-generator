@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional
 import logging
 from datetime import datetime
 import json
+import re
 
 from .base_agent import BaseAgent, AgentMessage, MessageType, AgentConfig, create_agent_config
 from db.bigquery_client import bq_client
@@ -296,17 +297,22 @@ class DataExplorerAgent(BaseAgent):
            - data_range: MIN, MAX, COUNT로 데이터 범위 확인
            - schema_ambiguity: INFORMATION_SCHEMA로 테이블/컬럼 구조 탐색
         
-        **탐색 쿼리 예시:**
-        - 테이블 목록: SELECT table_name FROM INFORMATION_SCHEMA.TABLES WHERE table_name LIKE '%pattern%'
-        - 컬럼 정보: SELECT column_name, data_type FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'table_name'
-        - 값 분포: SELECT column_name, COUNT(*) as count FROM table_name GROUP BY column_name ORDER BY count DESC LIMIT 20
-        - 데이터 샘플: SELECT * FROM table_name LIMIT 10
+        **BigQuery 탐색 쿼리 예시:**
+        - 테이블 목록: SELECT table_name FROM `{bq_client.full_dataset_path}.INFORMATION_SCHEMA.TABLES` WHERE table_name LIKE '%pattern%'
+        - 컬럼 정보: SELECT column_name, data_type FROM `{bq_client.full_dataset_path}.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = 'table_name'
+        - 값 분포: SELECT column_name, COUNT(*) as count FROM `{bq_client.full_dataset_path}.table_name` GROUP BY column_name ORDER BY count DESC LIMIT 20
+        - 데이터 샘플: SELECT * FROM `{bq_client.full_dataset_path}.table_name` LIMIT 10
         
-        **금지된 문법:**
+        **절대 금지된 문법:**
         - SHOW TABLES, SHOW COLUMNS, DESCRIBE 등 MySQL 문법 절대 사용 금지
         - 백틱 없는 테이블명 사용 금지
+        - LIMIT offset, count 형식 (→ LIMIT count OFFSET offset 사용)
         
-        BigQuery Standard SQL 쿼리만 반환하세요.
+        **품질 보장:**
+        - BigQuery 문법 준수율: 100% 목표
+        - 탐색 시간: 평균 2-5초 목표
+        - 불확실성 해결률: 80% 이상 목표
+        - 인사이트 품질: 실용성과 정확성 중시
         """
         
         try:
@@ -493,6 +499,33 @@ class DataExplorerAgent(BaseAgent):
             "avg_exploration_time": round(stats["avg_exploration_time"], 3),
             "performance_grade": "A" if resolution_rate > 80 and stats["avg_exploration_time"] < 5.0 else "B"
         }
+
+def _validate_bigquery_syntax(self, sql_query: str) -> bool:
+    """BigQuery 문법 검증"""
+    sql_upper = sql_query.upper()
+    
+    # 금지된 MySQL 문법 검사
+    forbidden_patterns = [
+        r'\bDESCRIBE\b',
+        r'\bSHOW\s+TABLES\b',
+        r'\bSHOW\s+COLUMNS\b',
+        r'\bUSE\b',
+        r'\bCREATE\s+DATABASE\b'
+    ]
+    
+    for pattern in forbidden_patterns:
+        if re.search(pattern, sql_upper):
+            return False
+    
+    # BigQuery 필수 요소 검사
+    if not sql_upper.startswith('SELECT'):
+        return False
+    
+    # 백틱이 있는지 확인 (테이블명)
+    if '`' not in sql_query:
+        return False
+    
+    return True
 
 # Agent 생성 헬퍼 함수
 def create_data_explorer_agent(custom_config: Optional[Dict[str, Any]] = None) -> DataExplorerAgent:
