@@ -710,7 +710,6 @@ class DynamicOrchestrator:
                 ]
             }
             
-            # 성공적인 완료를 위한 편의 필드 추가
             if final_completion_status["termination_reason"] == "success":
                 final_data = final_completion_status["final_result"]
                 result.update({
@@ -722,7 +721,7 @@ class DynamicOrchestrator:
                 })
             
             # 성능 통계 업데이트
-            self._update_performance_stats(result["success"], execution_time)
+            self._stats_update_performance(result["success"], execution_time)
             
             logger.info(f"Dynamic workflow completed in {execution_time:.2f}s with {iteration} iterations")
             return result
@@ -801,7 +800,7 @@ class DynamicOrchestrator:
             execution_time = (end_time - start_time).total_seconds()
             
             # 통계 업데이트
-            self._update_agent_stats(suggestion.agent_name, True, execution_time)
+            self._stats_update_agent(suggestion.agent_name, True, execution_time)
             
             return AgentExecutionResult(
                 agent_name=suggestion.agent_name,
@@ -816,7 +815,7 @@ class DynamicOrchestrator:
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
             
-            self._update_agent_stats(suggestion.agent_name, False, execution_time)
+            self._stats_update_agent(suggestion.agent_name, False, execution_time)
             
             return AgentExecutionResult(
                 agent_name=suggestion.agent_name,
@@ -867,8 +866,8 @@ class DynamicOrchestrator:
         
         return "\n\n".join(output_parts)
     
-    def _update_performance_stats(self, success: bool, execution_time: float):
-        """성능 통계 업데이트"""
+    def _stats_update_performance(self, success: bool, execution_time: float):
+        """[STATS] 성능 통계 업데이트 (내부 사용)"""
         self.performance_stats["total_executions"] += 1
         if success:
             self.performance_stats["successful_executions"] += 1
@@ -880,8 +879,8 @@ class DynamicOrchestrator:
             (current_avg * (total - 1) + execution_time) / total
         )
     
-    def _update_agent_stats(self, agent_name: str, success: bool, execution_time: float):
-        """Agent별 통계 업데이트"""
+    def _stats_update_agent(self, agent_name: str, success: bool, execution_time: float):
+        """[STATS] Agent별 통계 업데이트 (내부 사용)"""
         if agent_name in self.performance_stats["agent_utilization"]:
             stats = self.performance_stats["agent_utilization"][agent_name]
             stats["total_executions"] += 1
