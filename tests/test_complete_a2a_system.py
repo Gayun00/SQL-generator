@@ -54,16 +54,16 @@ async def test_orchestrator_agent_coordination():
     orchestrator = MasterOrchestrator()
     
     # 모든 Agent 등록
-    from agents.schema_intelligence_agent import create_schema_intelligence_agent
-    from agents.query_architect_agent import create_query_architect_agent
-    from agents.data_investigator_agent import create_data_investigator_agent
-    from agents.communication_specialist_agent import create_communication_specialist_agent
+    from agents.schema_analyzer_agent import create_schema_analyzer_agent
+    from agents.sql_generator_agent import create_sql_generator_agent
+    from agents.data_explorer_agent import create_data_explorer_agent
+    from agents.user_communicator_agent import create_user_communicator_agent
     
     agents = [
-        create_schema_intelligence_agent(),
-        create_query_architect_agent(),
-        create_data_investigator_agent(),
-        create_communication_specialist_agent()
+        create_schema_analyzer_agent(),
+        create_sql_generator_agent(),
+        create_data_explorer_agent(),
+        create_user_communicator_agent()
     ]
     
     # Agent 등록 확인
@@ -121,16 +121,16 @@ async def test_pure_a2a_workflow():
     orchestrator = MasterOrchestrator()
     
     # 모든 Agent 등록
-    from agents.schema_intelligence_agent import create_schema_intelligence_agent
-    from agents.query_architect_agent import create_query_architect_agent
-    from agents.data_investigator_agent import create_data_investigator_agent
-    from agents.communication_specialist_agent import create_communication_specialist_agent
+    from agents.schema_analyzer_agent import create_schema_analyzer_agent
+    from agents.sql_generator_agent import create_sql_generator_agent
+    from agents.data_explorer_agent import create_data_explorer_agent
+    from agents.user_communicator_agent import create_user_communicator_agent
     
     agents = [
-        create_schema_intelligence_agent(),
-        create_query_architect_agent(),
-        create_data_investigator_agent(),
-        create_communication_specialist_agent()
+        create_schema_analyzer_agent(),
+        create_sql_generator_agent(),
+        create_data_explorer_agent(),
+        create_user_communicator_agent()
     ]
     
     for agent in agents:
@@ -226,16 +226,16 @@ async def test_agent_statistics_summary():
     print("-" * 60)
     
     # 모든 Agent 생성
-    from agents.schema_intelligence_agent import create_schema_intelligence_agent
-    from agents.query_architect_agent import create_query_architect_agent
-    from agents.data_investigator_agent import create_data_investigator_agent
-    from agents.communication_specialist_agent import create_communication_specialist_agent
+    from agents.schema_analyzer_agent import create_schema_analyzer_agent
+    from agents.sql_generator_agent import create_sql_generator_agent
+    from agents.data_explorer_agent import create_data_explorer_agent
+    from agents.user_communicator_agent import create_user_communicator_agent
     
     agents = [
-        ("SchemaIntelligence", create_schema_intelligence_agent()),
-        ("QueryArchitect", create_query_architect_agent()),
-        ("DataInvestigator", create_data_investigator_agent()),
-        ("CommunicationSpecialist", create_communication_specialist_agent())
+        ("SchemaAnalyzer", create_schema_analyzer_agent()),
+        ("SQLGenerator", create_sql_generator_agent()),
+        ("DataExplorer", create_data_explorer_agent()),
+        ("UserCommunicator", create_user_communicator_agent())
     ]
     
     print("📊 Agent 통계 요약:")
@@ -266,8 +266,8 @@ async def test_system_scalability():
     orchestrator = MasterOrchestrator()
     
     # Agent 등록
-    from agents.query_architect_agent import create_query_architect_agent
-    agent = create_query_architect_agent()
+    from agents.sql_generator_agent import create_sql_generator_agent
+    agent = create_sql_generator_agent()
     orchestrator.register_agent(agent)
     
     concurrent_queries = [

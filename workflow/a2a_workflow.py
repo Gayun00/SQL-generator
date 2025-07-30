@@ -12,10 +12,10 @@ from typing import List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.dynamic_orchestrator import DynamicOrchestrator
-from agents.schema_intelligence_agent import create_schema_intelligence_agent
-from agents.query_architect_agent import create_query_architect_agent
-from agents.data_investigator_agent import create_data_investigator_agent
-from agents.communication_specialist_agent import create_communication_specialist_agent
+from agents.schema_analyzer_agent import create_schema_analyzer_agent
+from agents.sql_generator_agent import create_sql_generator_agent
+from agents.data_explorer_agent import create_data_explorer_agent
+from agents.user_communicator_agent import create_user_communicator_agent
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
 from rag.schema_retriever import schema_retriever
@@ -54,10 +54,10 @@ class A2AWorkflow:
             
             # 모든 Agent 등록
             agents = [
-                create_schema_intelligence_agent(),
-                create_query_architect_agent(),
-                create_data_investigator_agent(),
-                create_communication_specialist_agent()
+                create_schema_analyzer_agent(),
+                create_sql_generator_agent(),
+                create_data_explorer_agent(),
+                create_user_communicator_agent()
             ]
             
             for agent in agents:

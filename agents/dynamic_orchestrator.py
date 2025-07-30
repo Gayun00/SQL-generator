@@ -81,38 +81,38 @@ class AgentResultAnalyzer:
         agent_name = agent_result.agent_name
         result_data = agent_result.result_data
         
-        # 🔍 SchemaIntelligence 결과 분석
-        if agent_name == "schema_intelligence":
+        # 🔍 SchemaAnalyzer 결과 분석
+        if agent_name == "schema_analyzer":
             suggestions.extend(
-                AgentResultAnalyzer._analyze_schema_intelligence_result(result_data, context)
+                AgentResultAnalyzer._analyze_schema_analyzer_result(result_data, context)
             )
         
-        # 🕵️ DataInvestigator 결과 분석
-        elif agent_name == "data_investigator":
+        # 🕵️ DataExplorer 결과 분석
+        elif agent_name == "data_explorer":
             suggestions.extend(
-                AgentResultAnalyzer._analyze_data_investigator_result(result_data, context)
+                AgentResultAnalyzer._analyze_data_explorer_result(result_data, context)
             )
         
-        # 🏗️ QueryArchitect 결과 분석
-        elif agent_name == "query_architect":
+        # 🏗️ SQLGenerator 결과 분석
+        elif agent_name == "sql_generator":
             suggestions.extend(
-                AgentResultAnalyzer._analyze_query_architect_result(result_data, context)
+                AgentResultAnalyzer._analyze_sql_generator_result(result_data, context)
             )
         
-        # 💬 CommunicationSpecialist 결과 분석
-        elif agent_name == "communication_specialist":
+        # 💬 UserCommunicator 결과 분석
+        elif agent_name == "user_communicator":
             suggestions.extend(
-                AgentResultAnalyzer._analyze_communication_specialist_result(result_data, context)
+                AgentResultAnalyzer._analyze_user_communicator_result(result_data, context)
             )
         
         return suggestions
     
     @staticmethod
-    def _analyze_schema_intelligence_result(
+    def _analyze_schema_analyzer_result(
         result_data: Dict[str, Any], 
         context: ExecutionContext
     ) -> List[NextAgentSuggestion]:
-        """SchemaIntelligence 결과 분석"""
+        """SchemaAnalyzer 결과 분석"""
         suggestions = []
         
         # 분석 결과 추출
@@ -126,7 +126,7 @@ class AgentResultAnalyzer:
         if analysis_result.get("error"):
             # 분석 실패 시 커뮤니케이션 전문가에게 도움 요청
             suggestions.append(NextAgentSuggestion(
-                agent_name="communication_specialist",
+                agent_name="user_communicator",
                 task_type="generate_error_explanation",
                 priority=2,
                 reason=f"Schema analysis failed: {analysis_result['error']}",
@@ -150,7 +150,7 @@ class AgentResultAnalyzer:
         if has_uncertainty and confidence < 0.7:
             uncertainties = uncertainty_analysis.get("uncertainties", [])
             suggestions.append(NextAgentSuggestion(
-                agent_name="data_investigator",
+                agent_name="data_explorer",
                 task_type="explore_uncertainties",
                 priority=1,
                 reason=f"Uncertainties detected (confidence: {confidence:.2f})",
@@ -165,7 +165,7 @@ class AgentResultAnalyzer:
         # 불확실성이 없거나 신뢰도가 높으면 바로 SQL 생성
         elif not has_uncertainty or confidence >= 0.8:
             suggestions.append(NextAgentSuggestion(
-                agent_name="query_architect",
+                agent_name="sql_generator",
                 task_type="generate_sql",
                 priority=1,
                 reason=f"High confidence analysis (confidence: {confidence:.2f})",
@@ -181,7 +181,7 @@ class AgentResultAnalyzer:
         else:
             suggestions.extend([
                 NextAgentSuggestion(
-                    agent_name="data_investigator",
+                    agent_name="data_explorer",
                     task_type="quick_exploration",
                     priority=2,
                     reason=f"Medium confidence, quick exploration recommended",
@@ -191,7 +191,7 @@ class AgentResultAnalyzer:
                     }
                 ),
                 NextAgentSuggestion(
-                    agent_name="query_architect",
+                    agent_name="sql_generator",
                     task_type="generate_sql",
                     priority=3,
                     reason="Alternative: proceed with current analysis",
@@ -205,11 +205,11 @@ class AgentResultAnalyzer:
         return suggestions
     
     @staticmethod
-    def _analyze_data_investigator_result(
+    def _analyze_data_explorer_result(
         result_data: Dict[str, Any], 
         context: ExecutionContext
     ) -> List[NextAgentSuggestion]:
-        """DataInvestigator 결과 분석"""
+        """DataExplorer 결과 분석"""
         suggestions = []
         
         exploration_result = (
@@ -221,7 +221,7 @@ class AgentResultAnalyzer:
         if exploration_result.get("error"):
             # 탐색 실패 시 사용자 설명 요청
             suggestions.append(NextAgentSuggestion(
-                agent_name="communication_specialist",
+                agent_name="user_communicator",
                 task_type="generate_clarification",
                 priority=1,
                 reason=f"Data exploration failed: {exploration_result['error']}",
@@ -248,7 +248,7 @@ class AgentResultAnalyzer:
         # 성공적인 탐색 결과가 있으면 SQL 생성으로 진행
         if successful_explorations > 0 and len(insights) > 0:
             suggestions.append(NextAgentSuggestion(
-                agent_name="query_architect",
+                agent_name="sql_generator",
                 task_type="generate_sql",
                 priority=1,
                 reason=f"Exploration successful ({successful_explorations} queries, {len(insights)} insights)",
@@ -265,7 +265,7 @@ class AgentResultAnalyzer:
         elif successful_explorations > 0 and len(insights) == 0:
             suggestions.extend([
                 NextAgentSuggestion(
-                    agent_name="data_investigator",
+                    agent_name="data_explorer",
                     task_type="deep_exploration",
                     priority=2,
                     reason="Partial success, deeper exploration needed",
@@ -275,7 +275,7 @@ class AgentResultAnalyzer:
                     }
                 ),
                 NextAgentSuggestion(
-                    agent_name="communication_specialist",
+                    agent_name="user_communicator",
                     task_type="generate_clarification",
                     priority=3,
                     reason="Alternative: ask user for clarification",
@@ -289,7 +289,7 @@ class AgentResultAnalyzer:
         # 탐색이 완전히 실패했으면 사용자 설명 필요
         else:
             suggestions.append(NextAgentSuggestion(
-                agent_name="communication_specialist",
+                agent_name="user_communicator",
                 task_type="generate_clarification",
                 priority=1,
                 reason="Exploration failed, user clarification needed",
@@ -304,11 +304,11 @@ class AgentResultAnalyzer:
         return suggestions
     
     @staticmethod
-    def _analyze_query_architect_result(
+    def _analyze_sql_generator_result(
         result_data: Dict[str, Any], 
         context: ExecutionContext
     ) -> List[NextAgentSuggestion]:
-        """QueryArchitect 결과 분석"""
+        """SQLGenerator 결과 분석"""
         suggestions = []
         
         # QueryArchitect 결과는 직접 result_data에 포함됨
@@ -328,7 +328,7 @@ class AgentResultAnalyzer:
             if "improvement" in result_data:
                 # 이미 개선을 시도했는데도 실패했으면 사용자 도움 필요
                 suggestions.append(NextAgentSuggestion(
-                    agent_name="communication_specialist",
+                    agent_name="user_communicator",
                     task_type="generate_error_explanation",
                     priority=1,
                     reason=f"SQL generation failed after improvement attempts: {error_msg}",
@@ -343,7 +343,7 @@ class AgentResultAnalyzer:
             else:
                 # 첫 번째 실패면 개선 시도
                 suggestions.append(NextAgentSuggestion(
-                    agent_name="query_architect",
+                    agent_name="sql_generator",
                     task_type="execute_with_improvements",
                     priority=1,
                     reason=f"Initial generation failed, trying improvements: {error_msg}",
@@ -366,7 +366,7 @@ class AgentResultAnalyzer:
             # SQL이 제대로 생성되지 않음 - 커뮤니케이션으로 처리
             context.completion_criteria_met.add("sql_generation_failed")
             suggestions.append(NextAgentSuggestion(
-                agent_name="communication_specialist",
+                agent_name="user_communicator",
                 task_type="generate_error_explanation",
                 priority=1,
                 reason="SQL query generation failed or invalid",
@@ -394,7 +394,7 @@ class AgentResultAnalyzer:
                 # 성공적인 결과 - 바로 완료 가능
                 # 선택적으로 커뮤니케이션 체크 제안
                 suggestions.append(NextAgentSuggestion(
-                    agent_name="communication_specialist",
+                    agent_name="user_communicator",
                     task_type="final_review",
                     priority=4,  # 낮은 우선순위 (선택사항)
                     reason=f"SQL executed successfully ({returned_rows} rows), optional final review",
@@ -407,7 +407,7 @@ class AgentResultAnalyzer:
             else:
                 # 결과가 없음 - 확인 필요
                 suggestions.append(NextAgentSuggestion(
-                    agent_name="communication_specialist",
+                    agent_name="user_communicator",
                     task_type="empty_result_explanation",
                     priority=2,
                     reason="SQL executed but returned no rows",
@@ -426,7 +426,7 @@ class AgentResultAnalyzer:
             if any(pattern in error_message.lower() for pattern in 
                    ["unrecognized name", "does not exist", "invalid", "syntax error"]):
                 suggestions.append(NextAgentSuggestion(
-                    agent_name="query_architect",
+                    agent_name="sql_generator",
                     task_type="execute_with_improvements",
                     priority=1,
                     reason=f"SQL execution failed with fixable error: {error_message[:50]}...",
@@ -441,7 +441,7 @@ class AgentResultAnalyzer:
             else:
                 # 개선하기 어려운 오류 - 사용자 설명
                 suggestions.append(NextAgentSuggestion(
-                    agent_name="communication_specialist",
+                    agent_name="user_communicator",
                     task_type="generate_error_explanation",
                     priority=1,
                     reason=f"SQL execution failed with complex error: {error_message}",
@@ -456,11 +456,11 @@ class AgentResultAnalyzer:
         return suggestions
     
     @staticmethod
-    def _analyze_communication_specialist_result(
+    def _analyze_user_communicator_result(
         result_data: Dict[str, Any], 
         context: ExecutionContext
     ) -> List[NextAgentSuggestion]:
-        """CommunicationSpecialist 결과 분석"""
+        """UserCommunicator 결과 분석"""
         suggestions = []
         
         # 커뮤니케이션 결과는 보통 최종 단계이므로 완료 조건 확인
@@ -629,9 +629,9 @@ class DynamicOrchestrator:
         logger.info(f"Starting dynamic workflow execution for query: '{query[:50]}...'")
         
         try:
-            # 첫 번째 Agent 결정 (보통 SchemaIntelligence)
+            # 첫 번째 Agent 결정 (보통 SchemaAnalyzer)
             current_suggestions = [NextAgentSuggestion(
-                agent_name="schema_intelligence",
+                agent_name="schema_analyzer",
                 task_type="full_analysis",
                 priority=1,
                 reason="Initial schema analysis",
@@ -828,9 +828,9 @@ class DynamicOrchestrator:
     
     def _handle_agent_failure(self, failed_result: AgentExecutionResult, context: ExecutionContext) -> List[NextAgentSuggestion]:
         """Agent 실행 실패 처리"""
-        # 커뮤니케이션 전문가에게 오류 설명 요청
+        # 사용자 커뮤니케이터에게 오류 설명 요청
         return [NextAgentSuggestion(
-            agent_name="communication_specialist",
+            agent_name="user_communicator",
             task_type="generate_error_explanation",
             priority=1,
             reason=f"Agent {failed_result.agent_name} failed: {failed_result.error}",

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-QueryArchitect Agent Test - SQL 생성 및 최적화 전문 Agent 테스트
+SqlGenerator Agent Test - SQL 생성 및 최적화 전문 Agent 테스트
 
-기존 sql_generator와 새로운 QueryArchitect Agent의 
+기존 sql_generator와 새로운 SqlGenerator Agent의 
 성능과 정확도를 비교하는 테스트입니다.
 """
 
@@ -11,7 +11,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from agents.query_architect_agent import create_query_architect_agent
+from agents.sql_generator_agent import create_sql_generator_agent
 from agents.base_agent import AgentMessage, MessageType
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
@@ -19,7 +19,7 @@ from rag.schema_retriever import schema_retriever
 
 def initialize_test_environment():
     """테스트 환경 초기화"""
-    print("🔧 QueryArchitect 테스트 환경 초기화 중...")
+    print("🔧 SqlGenerator 테스트 환경 초기화 중...")
     
     try:
         # BigQuery 클라이언트와 스키마 초기화
@@ -52,7 +52,7 @@ async def test_simple_generation():
     print("-" * 40)
     
     # Agent 생성
-    agent = create_query_architect_agent()
+    agent = create_sql_generator_agent()
     
     # 테스트 케이스
     test_cases = [
@@ -77,7 +77,7 @@ async def test_simple_generation():
         # 메시지 생성
         message = AgentMessage(
             sender="test",
-            receiver="query_architect",
+            receiver="sql_generator",
             message_type=MessageType.REQUEST,
             content={
                 "task_type": "simple_generation",
@@ -123,7 +123,7 @@ async def test_optimized_generation():
     print("-" * 40)
     
     # Agent 생성
-    agent = create_query_architect_agent()
+    agent = create_sql_generator_agent()
     
     # 복잡한 테스트 케이스
     test_cases = [
@@ -159,7 +159,7 @@ async def test_optimized_generation():
         # 메시지 생성
         message = AgentMessage(
             sender="test",
-            receiver="query_architect",
+            receiver="sql_generator",
             message_type=MessageType.REQUEST,
             content={
                 "task_type": "optimized_generation",
@@ -226,7 +226,7 @@ async def test_agent_statistics():
     print("-" * 40)
     
     # Agent 생성
-    agent = create_query_architect_agent()
+    agent = create_sql_generator_agent()
     
     # 몇 개의 쿼리 실행해서 통계 생성
     test_queries = [
@@ -238,7 +238,7 @@ async def test_agent_statistics():
     for query in test_queries:
         message = AgentMessage(
             sender="test",
-            receiver="query_architect", 
+            receiver="sql_generator", 
             message_type=MessageType.REQUEST,
             content={
                 "task_type": "simple_generation",
@@ -268,7 +268,7 @@ async def test_agent_statistics():
 
 async def main():
     """메인 테스트 실행"""
-    print("🚀 QueryArchitect Agent 종합 테스트 시작!")
+    print("🚀 SqlGenerator Agent 종합 테스트 시작!")
     print("=" * 60)
     
     # 환경 초기화
@@ -303,10 +303,10 @@ async def main():
     
     # 최종 결과
     print("\\n" + "=" * 60)
-    print(f"🎯 QueryArchitect Agent 테스트 결과: {passed}/{total} 통과")
+    print(f"🎯 SqlGenerator Agent 테스트 결과: {passed}/{total} 통과")
     
     if passed == total:
-        print("🎉 모든 QueryArchitect 테스트 통과!")
+        print("🎉 모든 SqlGenerator 테스트 통과!")
         print("✅ SQL 생성 Agent가 성공적으로 구현되었습니다!")
     else:
         print(f"⚠️ {total - passed}개 테스트 실패")

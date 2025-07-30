@@ -1,5 +1,5 @@
 """
-SchemaIntelligence Agent - 스키마 분석 및 불확실성 탐지 전문 Agent
+SchemaAnalyzer Agent - 스키마 분석 및 불확실성 탐지 전문 Agent
 
 기존 sql_analyzer 노드를 Agent로 변환하여 스키마 패턴 인식, 불확실성 탐지,
 데이터 관계 분석에 특화된 지능형 Agent로 구현했습니다.
@@ -16,13 +16,13 @@ from langchain.schema import HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 
-class SchemaIntelligenceAgent(BaseAgent):
+class SchemaAnalyzerAgent(BaseAgent):
     """스키마 분석 및 불확실성 탐지 전문 Agent"""
     
     def __init__(self, config: Optional[AgentConfig] = None):
         if config is None:
             config = create_agent_config(
-                name="schema_intelligence",
+                name="schema_analyzer",
                 specialization="schema_analysis_uncertainty_detection",
                 model="gpt-4",
                 temperature=0.2,  # 정확성 중시
@@ -41,7 +41,7 @@ class SchemaIntelligenceAgent(BaseAgent):
         # 성능 추적
         self.analysis_history = []
         
-        logger.info(f"SchemaIntelligence Agent initialized with specialization: {self.specialization}")
+        logger.info(f"SchemaAnalyzer Agent initialized with specialization: {self.specialization}")
     
     def get_system_prompt(self) -> str:
         """스키마 분석 전문 시스템 프롬프트"""
@@ -484,10 +484,10 @@ class SchemaIntelligenceAgent(BaseAgent):
         }
 
 # Agent 생성 헬퍼 함수
-def create_schema_intelligence_agent(custom_config: Optional[Dict[str, Any]] = None) -> SchemaIntelligenceAgent:
-    """SchemaIntelligence Agent 생성"""
+def create_schema_analyzer_agent(custom_config: Optional[Dict[str, Any]] = None) -> SchemaAnalyzerAgent:
+    """SchemaAnalyzer Agent 생성"""
     config = create_agent_config(
-        name="schema_intelligence",
+        name="schema_analyzer",
         specialization="schema_analysis_uncertainty_detection",
         model="gpt-4",
         temperature=0.2,
@@ -495,4 +495,4 @@ def create_schema_intelligence_agent(custom_config: Optional[Dict[str, Any]] = N
         **(custom_config or {})
     )
     
-    return SchemaIntelligenceAgent(config)
+    return SchemaAnalyzerAgent(config)

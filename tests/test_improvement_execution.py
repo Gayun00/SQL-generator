@@ -2,7 +2,7 @@
 """
 개선방안 즉시 실행 기능 테스트
 
-QueryArchitect Agent의 SQL 실행 실패시 개선방안 즉시 적용 기능을 테스트합니다.
+SqlGenerator Agent의 SQL 실행 실패시 개선방안 즉시 적용 기능을 테스트합니다.
 """
 
 import sys
@@ -10,7 +10,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from agents.query_architect_agent import create_query_architect_agent
+from agents.sql_generator_agent import create_sql_generator_agent
 from agents.base_agent import AgentMessage, MessageType
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
@@ -51,7 +51,7 @@ async def test_improvement_execution():
     print("-" * 60)
     
     # Agent 생성
-    agent = create_query_architect_agent()
+    agent = create_sql_generator_agent()
     
     # 실패할 것으로 예상되는 SQL 테스트 케이스들
     test_cases = [
@@ -81,7 +81,7 @@ async def test_improvement_execution():
         # 메시지 생성
         message = AgentMessage(
             sender="test",
-            receiver="query_architect",
+            receiver="sql_generator",
             message_type=MessageType.REQUEST,
             content={
                 "task_type": "execute_with_improvements",
@@ -141,7 +141,7 @@ async def test_improvement_generation_only():
     print("-" * 60)
     
     # Agent 생성
-    agent = create_query_architect_agent()
+    agent = create_sql_generator_agent()
     
     # 간단한 컬럼명 오류 SQL
     sql_query = "SELECT * FROM us_plus.users WHERE status = 'active'"
@@ -214,7 +214,7 @@ async def main():
     
     if passed == total:
         print("🎉 개선방안 즉시 실행 기능이 성공적으로 구현되었습니다!")
-        print("✅ QueryArchitect Agent가 SQL 실패시 자동으로 개선방안을 제안하고 실행합니다!")
+        print("✅ SqlGenerator Agent가 SQL 실패시 자동으로 개선방안을 제안하고 실행합니다!")
     else:
         print(f"⚠️ {total - passed}개 테스트 실패")
         print("🔧 기능 개선이 필요합니다.")

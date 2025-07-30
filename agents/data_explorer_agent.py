@@ -1,5 +1,5 @@
 """
-DataInvestigator Agent - 데이터 탐색 및 불확실성 해결 전문 Agent
+DataExplorer Agent - 데이터 탐색 및 불확실성 해결 전문 Agent
 
 기존 sql_explorer 노드를 Agent로 변환하여 데이터베이스 탐색,
 불확실성 해결, 인사이트 발견에 특화된 지능형 Agent로 구현했습니다.
@@ -24,13 +24,13 @@ class ExplorationStrategy:
     VALUE_DISCOVERY = "value_discovery" # 컬럼 값 탐색
     TEMPORAL_ANALYSIS = "temporal"      # 시간 기반 분석
 
-class DataInvestigatorAgent(BaseAgent):
+class DataExplorerAgent(BaseAgent):
     """데이터 탐색 및 불확실성 해결 전문 Agent"""
     
     def __init__(self, config: Optional[AgentConfig] = None):
         if config is None:
             config = create_agent_config(
-                name="data_investigator",
+                name="data_explorer",
                 specialization="data_exploration_investigation",
                 model="gpt-4",
                 temperature=0.2,  # 탐색의 다양성과 안정성 균형
@@ -454,10 +454,10 @@ class DataInvestigatorAgent(BaseAgent):
         }
 
 # Agent 생성 헬퍼 함수
-def create_data_investigator_agent(custom_config: Optional[Dict[str, Any]] = None) -> DataInvestigatorAgent:
-    """DataInvestigator Agent 생성"""
+def create_data_explorer_agent(custom_config: Optional[Dict[str, Any]] = None) -> DataExplorerAgent:
+    """DataExplorer Agent 생성"""
     config = create_agent_config(
-        name="data_investigator",
+        name="data_explorer",
         specialization="data_exploration_investigation",
         model="gpt-4",
         temperature=0.2,
@@ -465,4 +465,4 @@ def create_data_investigator_agent(custom_config: Optional[Dict[str, Any]] = Non
         **(custom_config or {})
     )
     
-    return DataInvestigatorAgent(config)
+    return DataExplorerAgent(config)

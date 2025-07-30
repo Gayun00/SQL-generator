@@ -1,7 +1,7 @@
 """
-QueryArchitect Agent - SQL 설계 및 최적화 전문 Agent
+SQLGenerator Agent - SQL 생성 및 최적화 전문 Agent
 
-기존 sql_generator 노드를 Agent로 변환하여 SQL 아키텍처 설계,
+기존 sql_generator 노드를 Agent로 변환하여 SQL 생성,
 쿼리 최적화, 성능 튜닝에 특화된 지능형 Agent로 구현했습니다.
 """
 
@@ -25,13 +25,13 @@ class QueryComplexity:
     COMPLEX = "complex"         # 서브쿼리, 윈도우 함수 등
     ADVANCED = "advanced"       # 복잡한 분석 쿼리
 
-class QueryArchitectAgent(BaseAgent):
-    """SQL 설계 및 최적화 전문 Agent"""
+class SQLGeneratorAgent(BaseAgent):
+    """SQL 생성 및 최적화 전문 Agent"""
     
     def __init__(self, config: Optional[AgentConfig] = None):
         if config is None:
             config = create_agent_config(
-                name="query_architect",
+                name="sql_generator",
                 specialization="sql_design_optimization",
                 model="gpt-4",
                 temperature=0.1,  # 정확성과 일관성 중시
@@ -879,10 +879,10 @@ class QueryArchitectAgent(BaseAgent):
         }
 
 # Agent 생성 헬퍼 함수
-def create_query_architect_agent(custom_config: Optional[Dict[str, Any]] = None) -> QueryArchitectAgent:
-    """QueryArchitect Agent 생성"""
+def create_sql_generator_agent(custom_config: Optional[Dict[str, Any]] = None) -> SQLGeneratorAgent:
+    """SQLGenerator Agent 생성"""
     config = create_agent_config(
-        name="query_architect",
+        name="sql_generator",
         specialization="sql_design_optimization",
         model="gpt-4",
         temperature=0.1,
@@ -890,4 +890,4 @@ def create_query_architect_agent(custom_config: Optional[Dict[str, Any]] = None)
         **(custom_config or {})
     )
     
-    return QueryArchitectAgent(config)
+    return SQLGeneratorAgent(config)

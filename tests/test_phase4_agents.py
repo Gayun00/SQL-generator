@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Phase 4 Agents Test - DataInvestigator & CommunicationSpecialist Agent 테스트
+Phase 4 Agents Test - DataExplorer & UserCommunicator Agent 테스트
 
 새로 구현된 두 Agent의 기능을 종합적으로 테스트합니다.
 """
@@ -10,8 +10,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from agents.data_investigator_agent import create_data_investigator_agent
-from agents.communication_specialist_agent import create_communication_specialist_agent
+from agents.data_explorer_agent import create_data_explorer_agent
+from agents.user_communicator_agent import create_user_communicator_agent
 from agents.base_agent import AgentMessage, MessageType
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
@@ -46,13 +46,13 @@ def initialize_test_environment():
         print(f"❌ 환경 초기화 실패: {str(e)}")
         return False
 
-async def test_data_investigator():
-    """DataInvestigator Agent 테스트"""
-    print("\\n🧪 DataInvestigator Agent 테스트")
+async def test_data_explorer():
+    """DataExplorer Agent 테스트"""
+    print("\\n🧪 DataExplorer Agent 테스트")
     print("-" * 50)
     
     # Agent 생성
-    agent = create_data_investigator_agent()
+    agent = create_data_explorer_agent()
     
     # 테스트 케이스: 불확실성 탐색
     test_uncertainties = [
@@ -73,7 +73,7 @@ async def test_data_investigator():
     # 메시지 생성
     message = AgentMessage(
         sender="test",
-        receiver="data_investigator",
+        receiver="data_explorer",
         message_type=MessageType.REQUEST,
         content={
             "task_type": "uncertainty_exploration",
@@ -84,7 +84,7 @@ async def test_data_investigator():
     
     try:
         # Agent 실행
-        print("🔄 DataInvestigator Agent 실행 중...")
+        print("🔄 DataExplorer Agent 실행 중...")
         response = await agent.process_message(message)
         
         if response.message_type == MessageType.ERROR:
@@ -125,18 +125,18 @@ async def test_data_investigator():
         return True
         
     except Exception as e:
-        print(f"❌ DataInvestigator 테스트 실패: {str(e)}")
+        print(f"❌ DataExplorer 테스트 실패: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
 
-async def test_communication_specialist():
-    """CommunicationSpecialist Agent 테스트"""
-    print("\\n🧪 CommunicationSpecialist Agent 테스트")
+async def test_user_communicator():
+    """UserCommunicator Agent 테스트"""
+    print("\\n🧪 UserCommunicator Agent 테스트")
     print("-" * 50)
     
     # Agent 생성
-    agent = create_communication_specialist_agent()
+    agent = create_user_communicator_agent()
     
     # 테스트 케이스 1: 입력 검증
     print("\\n📋 테스트 1: 사용자 입력 검증")
@@ -159,7 +159,7 @@ async def test_communication_specialist():
         
         message = AgentMessage(
             sender="test",
-            receiver="communication_specialist",
+            receiver="user_communicator",
             message_type=MessageType.REQUEST,
             content={
                 "task_type": "validate_input",
@@ -262,7 +262,7 @@ async def test_communication_specialist():
         return len(questions) > 0
         
     except Exception as e:
-        print(f"❌ CommunicationSpecialist 테스트 실패: {str(e)}")
+        print(f"❌ UserCommunicator 테스트 실패: {str(e)}")
         import traceback
         traceback.print_exc()
         return False
@@ -273,12 +273,12 @@ async def test_agent_statistics():
     print("-" * 50)
     
     # 두 Agent 생성
-    data_agent = create_data_investigator_agent()
-    comm_agent = create_communication_specialist_agent()
+    data_agent = create_data_explorer_agent()
+    comm_agent = create_user_communicator_agent()
     
     agents = [
-        ("DataInvestigator", data_agent),
-        ("CommunicationSpecialist", comm_agent)
+        ("DataExplorer", data_agent),
+        ("UserCommunicator", comm_agent)
     ]
     
     for agent_name, agent in agents:
@@ -307,8 +307,8 @@ async def main():
     
     # 테스트 실행
     tests = [
-        ("DataInvestigator Agent", test_data_investigator),
-        ("CommunicationSpecialist Agent", test_communication_specialist),
+        ("DataExplorer Agent", test_data_explorer),
+        ("UserCommunicator Agent", test_user_communicator),
         ("Agent 통계", test_agent_statistics)
     ]
     
@@ -336,7 +336,7 @@ async def main():
     
     if passed == total:
         print("🎉 모든 Phase 4 Agent 테스트 통과!")
-        print("✅ DataInvestigator & CommunicationSpecialist Agents가 성공적으로 구현되었습니다!")
+        print("✅ DataExplorer & UserCommunicator Agents가 성공적으로 구현되었습니다!")
     else:
         print(f"⚠️ {total - passed}개 테스트 실패")
         print("🔧 Agent 개선이 필요합니다.")

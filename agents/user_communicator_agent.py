@@ -1,5 +1,5 @@
 """
-CommunicationSpecialist Agent - 사용자 커뮤니케이션 및 재질문 전문 Agent
+UserCommunicator Agent - 사용자 커뮤니케이션 및 재질문 전문 Agent
 
 기존 sql_clarifier 노드를 Agent로 변환하여 사용자와의 소통,
 불확실성 해결을 위한 재질문, 명확한 요구사항 파악에 특화된 지능형 Agent로 구현했습니다.
@@ -31,13 +31,13 @@ class QuestionCategory:
     BUSINESS_LOGIC = "business_logic"       # 비즈니스 로직
     SCHEMA_AMBIGUITY = "schema_ambiguity"   # 스키마 모호성
 
-class CommunicationSpecialistAgent(BaseAgent):
+class UserCommunicatorAgent(BaseAgent):
     """사용자 커뮤니케이션 및 재질문 전문 Agent"""
     
     def __init__(self, config: Optional[AgentConfig] = None):
         if config is None:
             config = create_agent_config(
-                name="communication_specialist",
+                name="user_communicator",
                 specialization="user_communication_clarification",
                 model="gpt-4",
                 temperature=0.3,  # 창의적이면서도 일관된 소통
@@ -484,10 +484,10 @@ class CommunicationSpecialistAgent(BaseAgent):
         }
 
 # Agent 생성 헬퍼 함수
-def create_communication_specialist_agent(custom_config: Optional[Dict[str, Any]] = None) -> CommunicationSpecialistAgent:
-    """CommunicationSpecialist Agent 생성"""
+def create_user_communicator_agent(custom_config: Optional[Dict[str, Any]] = None) -> UserCommunicatorAgent:
+    """UserCommunicator Agent 생성"""
     config = create_agent_config(
-        name="communication_specialist",
+        name="user_communicator",
         specialization="user_communication_clarification",
         model="gpt-4",
         temperature=0.3,
@@ -495,4 +495,4 @@ def create_communication_specialist_agent(custom_config: Optional[Dict[str, Any]
         **(custom_config or {})
     )
     
-    return CommunicationSpecialistAgent(config)
+    return UserCommunicatorAgent(config)
