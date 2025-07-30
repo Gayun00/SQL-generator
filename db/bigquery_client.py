@@ -13,6 +13,7 @@ class BigQueryClient:
         self.project_id = None  # keyfile에서 추출
         self.client = None
         self.schema_info = {}
+        self.full_dataset_path = None  # project_id.dataset 형식
         
     def connect(self) -> bool:
         """BigQuery 클라이언트 연결"""
@@ -43,11 +44,17 @@ class BigQueryClient:
                 credentials=credentials
             )
             
+            # 완전한 데이터셋 경로 설정
+            if self.default_dataset:
+                self.full_dataset_path = f"{self.project_id}.{self.default_dataset}"
+            
             # 연결 테스트
             test_query = "SELECT 1 as test_connection"
             self.client.query(test_query).result()
             print(f"✅ BigQuery 연결 성공: {self.project_id}")
             print(f"📁 사용된 keyfile: {self.keyfile_path}")
+            if self.full_dataset_path:
+                print(f"📊 기본 데이터셋 경로: {self.full_dataset_path}")
             return True
             
         except FileNotFoundError:
@@ -332,6 +339,36 @@ class BigQueryClient:
                 "query": query,
                 "results": []
             }
+    
+    def get_full_table_path(self, table_name: str) -> str:
+        """테이블명을 완전한 BigQuery 경로로 변환"""
+        if not table_name:
+            return ""
+        
+        # 이미 백틱으로 감싸져 있으면 그대로 반환
+        if table_name.startswith('`') and table_name.endswith('`'):
+            return table_name
+        
+        # 이미 프로젝트.데이터셋.테이블 형식이면 백틱만 추가
+        if '.' in table_name and table_name.count('.') >= 2:
+            return f"`{table_name}`"
+        
+        # 테이블명만 있는 경우 기본 데이터셋 경로 추가
+        if self.full_dataset_path:
+            if '.' in table_name:  # dataset.table 형식
+                return f"`{self.project_id}.{table_name}`"
+            else:  # table 형식
+                return f"`{self.full_dataset_path}.{table_name}`"
+        
+        # 기본 데이터셋이 없으면 경고와 함께 원본 반환
+        print(f"⚠️ 기본 데이터셋이 설정되지 않았습니다. 테이블명: {table_name}")
+        return table_name
+    
+    def get_information_schema_path(self, schema_type: str = "COLUMNS") -> str:
+        """INFORMATION_SCHEMA 경로 생성"""
+        if self.full_dataset_path:
+            return f"`{self.full_dataset_path}.INFORMATION_SCHEMA.{schema_type}`"
+        return f"INFORMATION_SCHEMA.{schema_type}"
 
 # 전역 클라이언트 인스턴스
 bq_client = BigQueryClient()

@@ -60,42 +60,79 @@ class SQLGeneratorAgent(BaseAgent):
         logger.info(f"SqlGenerator Agent initialized with specialization: {self.specialization}")
     
     def get_system_prompt(self) -> str:
-        """SQL 생성 전문 시스템 프롬프트"""
+        """BigQuery 특화 SQL 생성 전문 시스템 프롬프트"""
         return f"""
-        당신은 SQL 설계 및 최적화 전문 AI Agent입니다.
+        당신은 BigQuery 전문 SQL 설계 및 최적화 AI Agent입니다.
         
         **전문 분야:**
-        - BigQuery SQL 아키텍처 설계
-        - 쿼리 성능 최적화 및 튜닝
+        - BigQuery Standard SQL 아키텍처 설계
+        - 쿼리 성능 최적화 및 비용 효율화
         - 복잡한 JOIN 전략 수립
-        - 인덱스 활용 및 실행 계획 최적화
+        - 파티션/클러스터링 활용 최적화
         
         **핵심 역할:**
-        1. 사용자 요청을 정확한 SQL로 변환
+        1. 사용자 요청을 정확한 BigQuery SQL로 변환
         2. 성능 최적화된 쿼리 생성
         3. BigQuery 특화 문법 및 함수 활용
         4. 스키마 정보 기반 정확한 테이블/컬럼 매핑
         
-        **SQL 생성 원칙:**
-        - BigQuery 표준 SQL 문법 사용
-        - 테이블명은 완전한 형식 (dataset.table) 사용
+        **BigQuery SQL 생성 원칙:**
+        - **ONLY BigQuery Standard SQL 문법 사용** (MySQL/PostgreSQL 문법 절대 금지)
+        - 테이블명은 백틱과 완전한 형식 사용: `project_id.dataset.table`
+        - 환경변수 기반 데이터셋 경로 활용 (예: us-all-data.us_plus)
         - 효율적이고 성능이 좋은 쿼리 생성
         - 적절한 LIMIT 사용으로 결과 제한 (기본 100)
-        - 날짜/시간 처리에 TIMESTAMP, DATE 함수 적극 활용
-        - JOIN이 필요한 경우 최적화된 JOIN 조건 사용
-        - 집계 및 윈도우 함수 적절히 활용
+        - 스캔되는 데이터량 최소화로 비용 절약
+        
+        **BigQuery 특화 문법 가이드:**
+        1. **테이블 정보 조회**:
+           ```sql
+           SELECT column_name, data_type, is_nullable
+           FROM `project_id.dataset.INFORMATION_SCHEMA.COLUMNS`
+           WHERE table_name = 'table_name'
+           ORDER BY ordinal_position;
+           ```
+        
+        2. **날짜/시간 처리**:
+           - PARSE_TIMESTAMP('%Y-%m-%dT%H:%M:%E*SZ', timestamp_string)
+           - EXTRACT(DATE FROM timestamp_column)
+           - DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+        
+        3. **데이터 타입 변환**:
+           - CAST(column AS STRING/INT64/FLOAT64)
+           - SAFE_CAST(column AS type) -- 오류 방지
+        
+        4. **문자열 처리**:
+           - CONCAT(str1, str2) 또는 str1 || str2
+           - REGEXP_CONTAINS(text, pattern)
+           - SPLIT(text, delimiter)
+        
+        5. **배열/구조체 처리**:
+           - UNNEST(array_column)
+           - array_column[OFFSET(0)] -- 첫 번째 요소
+        
+        **금지된 문법 (MySQL/PostgreSQL):**
+        - SHOW TABLES, SHOW COLUMNS, DESCRIBE (→ INFORMATION_SCHEMA 사용)
+        - LIMIT offset, count (→ LIMIT count OFFSET offset)
+        - 백틱 없는 테이블명 (→ 반드시 백틱 사용)
+        - DATE_FORMAT (→ FORMAT_DATE 사용)
         
         **성능 최적화 전략:**
-        - 인덱스 활용 가능한 WHERE 조건 우선 배치
-        - 불필요한 컬럼 조회 최소화
-        - JOIN 순서 최적화 (작은 테이블 먼저)
-        - 서브쿼리보다 JOIN 선호
-        - 파티션 컬럼 활용 (날짜 기반)
+        - WHERE 절에서 파티션 컬럼(날짜) 우선 필터링
+        - SELECT *보다 필요한 컬럼만 조회
+        - 큰 테이블 JOIN 시 작은 테이블을 먼저 필터링
+        - 윈도우 함수보다 집계 함수 우선 고려
+        - 서브쿼리보다 WITH 절(CTE) 사용 권장
+        
+        **데이터셋 경로 규칙:**
+        - 프로젝트가 us-all-data인 경우: `us-all-data.us_plus.table_name`
+        - 항상 백틱으로 감싸서 사용
+        - INFORMATION_SCHEMA 조회시에도 전체 경로 사용
         
         **품질 보장:**
-        - 생성 시간: 평균 1-3초 목표
-        - 정확도: 98% 이상 목표
-        - 성능: 최적화 적용률 80% 이상 목표
+        - BigQuery 문법 준수율: 100% 목표
+        - 쿼리 성능: 스캔 데이터량 최소화
+        - 비용 효율성: 적절한 LIMIT과 WHERE 조건 사용
         """
     
     async def process_message(self, message: AgentMessage) -> AgentMessage:
@@ -155,6 +192,16 @@ class SQLGeneratorAgent(BaseAgent):
         # 분석 결과 컨텍스트 생성
         analysis_context = self._build_analysis_context(analysis_result)
         
+        # 데이터셋 경로 정보 추가
+        dataset_info = ""
+        if bq_client.full_dataset_path:
+            dataset_info = f"""
+        **데이터셋 경로 정보:**
+        - 기본 경로: {bq_client.full_dataset_path}
+        - 테이블 사용시: `{bq_client.full_dataset_path}.table_name` 형식 사용
+        - INFORMATION_SCHEMA: `{bq_client.full_dataset_path}.INFORMATION_SCHEMA.COLUMNS`
+        """
+        
         # 최적화된 SQL 생성 프롬프트
         user_message = f"""
         사용자 요청: {query}
@@ -166,16 +213,24 @@ class SQLGeneratorAgent(BaseAgent):
         
         {exploration_context}
         
-        위 정보를 종합하여 성능 최적화된 BigQuery SQL 쿼리를 생성해주세요.
+        {dataset_info}
         
-        최적화 고려사항:
-        1. 인덱스 활용 가능한 WHERE 조건 배치
-        2. 적절한 JOIN 순서 (작은 테이블 먼저)
-        3. 불필요한 컬럼 조회 최소화
-        4. 파티션 컬럼 활용 (날짜 기반)
-        5. LIMIT 사용으로 결과 제한
+        위 정보를 종합하여 성능 최적화된 BigQuery Standard SQL 쿼리를 생성해주세요.
         
-        SQL 쿼리만 반환하세요.
+        **BigQuery 최적화 고려사항:**
+        1. 테이블명은 반드시 백틱과 완전한 경로 사용: `project.dataset.table`
+        2. WHERE 절에서 파티션 컬럼(날짜) 우선 필터링
+        3. 적절한 JOIN 순서 (작은 테이블 먼저)
+        4. 불필요한 컬럼 조회 최소화 (SELECT * 지양)
+        5. LIMIT 사용으로 결과 제한 (기본 100)
+        6. INFORMATION_SCHEMA 조회시에도 완전한 경로 사용
+        
+        **금지사항:**
+        - MySQL/PostgreSQL 문법 절대 사용 금지
+        - SHOW, DESCRIBE 등 MySQL 문법
+        - 백틱 없는 테이블명
+        
+        BigQuery Standard SQL 쿼리만 반환하세요.
         """
         
         try:

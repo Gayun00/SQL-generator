@@ -317,6 +317,11 @@ class AgentResultAnalyzer:
         # 디버깅: SqlGenerator 결과 로깅
         logger.info(f"SqlGenerator result keys: {list(result_data.keys())}")
         logger.info(f"SQL query: {result_data.get('sql_query', 'None')[:100] if result_data.get('sql_query') else 'None'}")
+        
+        # SQL 실행 결과가 있으면 표로 출력
+        if 'query_result' in result_data and result_data['query_result']:
+            AgentResultAnalyzer._print_sql_results_table(result_data['query_result'], max_rows=2)
+        
         if 'execution_result' in result_data:
             logger.info(f"Execution result: {result_data.get('execution_result')}")
         if 'bigquery_result' in result_data:
@@ -567,6 +572,54 @@ class AgentResultAnalyzer:
             })
         
         return completion_status
+
+    @staticmethod
+    def _print_sql_results_table(execution_result: Dict[str, Any], max_rows: int = 2):
+        """SQL 실행 결과를 표로 출력 (최대 2행)"""
+        try:
+            if not execution_result.get("success"):
+                print(f"❌ SQL 실행 실패: {execution_result.get('error', 'Unknown error')}")
+                return
+            
+            data = execution_result.get("data", [])
+            if not data:
+                print("📊 쿼리 실행 완료 (반환된 데이터 없음)")
+                return
+            
+            # 기본 정보 출력
+            print(f"\n📊 SQL 실행 결과:")
+            print(f"   - 반환된 행 수: {execution_result.get('returned_rows', 0)}개")
+            print(f"   - 처리된 바이트: {execution_result.get('total_bytes_processed', 0):,} bytes")
+            print(f"   - 실행 시간: {execution_result.get('execution_time', 0):.2f}초")
+            
+            # 표 형태로 데이터 출력
+            if data and len(data) > 0:
+                columns = list(data[0].keys())
+                
+                # 컬럼 너비 계산 (최대 15자)
+                col_widths = {}
+                for col in columns:
+                    col_widths[col] = min(15, len(str(col)))
+                    for row in data[:max_rows]:
+                        col_widths[col] = max(col_widths[col], min(15, len(str(row.get(col, '')))))
+                
+                # 헤더 출력
+                header = " | ".join(f"{col:<{col_widths[col]}}" for col in columns)
+                print(f"\n   {header}")
+                print("   " + "-" * len(header))
+                
+                # 데이터 행 출력 (최대 2행)
+                for i, row in enumerate(data[:max_rows]):
+                    row_str = " | ".join(f"{str(row.get(col, '')):<{col_widths[col]}}" for col in columns)
+                    print(f"   {row_str}")
+                
+                if len(data) > max_rows:
+                    print(f"   ... (총 {len(data)}개 행 중 {max_rows}개만 표시)")
+                
+                print("   " + "-" * len(header))
+            
+        except Exception as e:
+            print(f"❌ 결과 출력 중 오류: {str(e)}")
 
 
 class DynamicOrchestrator:

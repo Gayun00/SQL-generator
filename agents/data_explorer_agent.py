@@ -60,37 +60,53 @@ class DataExplorerAgent(BaseAgent):
         
     
     def get_system_prompt(self) -> str:
-        """데이터 탐색 전문 시스템 프롬프트"""
+        """BigQuery 특화 데이터 탐색 전문 시스템 프롬프트"""
         return f"""
-        당신은 데이터 탐색 및 불확실성 해결 전문 AI Agent입니다.
+        당신은 BigQuery 데이터 탐색 및 불확실성 해결 전문 AI Agent입니다.
         
         **전문 분야:**
-        - 데이터베이스 구조 탐색 및 이해
-        - 불확실성 해결을 위한 탐색 쿼리 설계
+        - BigQuery 데이터베이스 구조 탐색 및 이해
+        - 불확실성 해결을 위한 BigQuery 탐색 쿼리 설계
+        - BigQuery INFORMATION_SCHEMA 활용한 메타데이터 분석
         - 데이터 패턴 및 관계 발견
         - 통계적 분석을 통한 인사이트 도출
         
         **핵심 역할:**
         1. 사용자 요청의 불확실성 분석
-        2. 탐색 쿼리 자동 생성 및 실행
+        2. BigQuery 탐색 쿼리 자동 생성 및 실행
         3. 데이터 인사이트 발견 및 요약
         4. 불확실성 해결 방안 제시
         
-        **탐색 원칙:**
+        **BigQuery 탐색 원칙:**
+        - **ONLY BigQuery Standard SQL 문법 사용** (MySQL/PostgreSQL 문법 절대 금지)
         - 안전하고 효율적인 탐색 쿼리 생성
+        - 테이블명은 백틱과 완전한 형식 사용: `us-all-data.us_plus.table_name`
         - LIMIT 사용으로 성능 최적화 (기본 20개)
         - 점진적 탐색: 간단한 것부터 복잡한 것으로
         - 실용적 인사이트 도출 및 제공
         - 탐색 결과의 명확한 해석 및 설명
         
-        **탐색 전략:**
+        **BigQuery 탐색 전략:**
         - quick_scan: 빠른 데이터 구조 파악 (LIMIT 10)
-        - statistical: 집계 및 통계 분석 (COUNT, AVG, etc)
+        - statistical: 집계 및 통계 분석 (COUNT, AVG, SUM, etc)
         - relationship: JOIN을 통한 테이블 관계 탐색
         - value_discovery: DISTINCT, GROUP BY로 값 패턴 분석
-        - temporal: 날짜/시간 기반 트렌드 분석
+        - temporal: 날짜/시간 기반 트렌드 분석 (EXTRACT, DATE_SUB 활용)
+        - schema_exploration: INFORMATION_SCHEMA로 메타데이터 탐색
+        
+        **BigQuery 특화 탐색 패턴:**
+        - 테이블 목록: `SELECT table_name FROM \`us-all-data.us_plus.INFORMATION_SCHEMA.TABLES\``
+        - 컬럼 정보: `SELECT column_name, data_type FROM \`us-all-data.us_plus.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'table_name'`
+        - 데이터 샘플: `SELECT * FROM \`us-all-data.us_plus.table_name\` LIMIT 10`
+        - 값 분포: `SELECT column_name, COUNT(*) as count FROM \`us-all-data.us_plus.table_name\` GROUP BY column_name ORDER BY count DESC`
+        
+        **금지된 문법:**
+        - SHOW TABLES, SHOW COLUMNS, DESCRIBE 등 MySQL 문법 절대 사용 금지
+        - 백틱 없는 테이블명 사용 금지
+        - LIMIT offset, count 형식 (→ LIMIT count OFFSET offset 사용)
         
         **품질 보장:**
+        - BigQuery 문법 준수율: 100% 목표
         - 탐색 시간: 평균 2-5초 목표
         - 불확실성 해결률: 80% 이상 목표
         - 인사이트 품질: 실용성과 정확성 중시
@@ -249,6 +265,16 @@ class DataExplorerAgent(BaseAgent):
         if uncertainty.get("exploration_query"):
             return uncertainty["exploration_query"]
         
+        # 데이터셋 경로 정보 추가
+        dataset_info = ""
+        if bq_client.full_dataset_path:
+            dataset_info = f"""
+        **데이터셋 경로 정보:**
+        - 기본 경로: {bq_client.full_dataset_path}
+        - 테이블 경로: `{bq_client.full_dataset_path}.table_name`
+        - INFORMATION_SCHEMA: `{bq_client.full_dataset_path}.INFORMATION_SCHEMA.TABLES/COLUMNS`
+        """
+        
         # 자동 탐색 쿼리 생성
         prompt = f"""
         불확실성 정보:
@@ -256,18 +282,31 @@ class DataExplorerAgent(BaseAgent):
         - 설명: {description}
         - 원본 쿼리: {original_query}
         
-        이 불확실성을 해결하기 위한 탐색용 BigQuery SQL을 생성해주세요.
+        {dataset_info}
         
-        탐색 쿼리 생성 원칙:
-        1. 안전하고 효율적인 쿼리 (LIMIT 20 사용)
-        2. 불확실성 타입에 따른 적절한 탐색 전략:
+        이 불확실성을 해결하기 위한 탐색용 BigQuery Standard SQL을 생성해주세요.
+        
+        **BigQuery 탐색 쿼리 생성 원칙:**
+        1. **ONLY BigQuery Standard SQL 문법 사용** (MySQL/PostgreSQL 문법 절대 금지)
+        2. 안전하고 효율적인 쿼리 (LIMIT 20 사용)
+        3. 테이블명은 백틱과 완전한 형식 사용: `project.dataset.table`
+        4. 불확실성 타입에 따른 적절한 탐색 전략:
            - column_values: DISTINCT, GROUP BY로 가능한 값들 탐색
-           - table_relationship: JOIN 가능성 탐색
+           - table_relationship: JOIN 가능성 탐색  
            - data_range: MIN, MAX, COUNT로 데이터 범위 확인
-           - schema_ambiguity: 테이블/컬럼 구조 탐색
-        3. 실용적이고 의미있는 결과 도출
+           - schema_ambiguity: INFORMATION_SCHEMA로 테이블/컬럼 구조 탐색
         
-        SQL 쿼리만 반환하세요.
+        **탐색 쿼리 예시:**
+        - 테이블 목록: SELECT table_name FROM INFORMATION_SCHEMA.TABLES WHERE table_name LIKE '%pattern%'
+        - 컬럼 정보: SELECT column_name, data_type FROM INFORMATION_SCHEMA.COLUMNS WHERE table_name = 'table_name'
+        - 값 분포: SELECT column_name, COUNT(*) as count FROM table_name GROUP BY column_name ORDER BY count DESC LIMIT 20
+        - 데이터 샘플: SELECT * FROM table_name LIMIT 10
+        
+        **금지된 문법:**
+        - SHOW TABLES, SHOW COLUMNS, DESCRIBE 등 MySQL 문법 절대 사용 금지
+        - 백틱 없는 테이블명 사용 금지
+        
+        BigQuery Standard SQL 쿼리만 반환하세요.
         """
         
         try:
@@ -334,12 +373,14 @@ class DataExplorerAgent(BaseAgent):
     
     async def _discover_table_structure(self, table_name: str) -> Dict[str, Any]:
         """테이블 구조 발견"""
-        # 간단한 구조 탐색 쿼리
+        # BigQuery 문법으로 구조 탐색 쿼리 생성
+        # 테이블명에 백틱 추가 (프로젝트.데이터셋 경로 포함)
+        full_table_name = f"`us-all-data.us_plus.{table_name}`" if not table_name.startswith('`') else table_name
+        
         structure_query = f"""
         SELECT 
-            COUNT(*) as total_rows,
-            COUNT(DISTINCT EXTRACT(DATE FROM created_at)) as date_range_days
-        FROM {table_name}
+            COUNT(*) as total_rows
+        FROM {full_table_name}
         LIMIT 1
         """
         
