@@ -478,19 +478,19 @@ class AgentResultAnalyzer:
         return suggestions  # 보통 빈 리스트 (더 이상 진행하지 않음)
     
     @staticmethod
-    def determine_completion_readiness(context: ExecutionContext) -> Dict[str, Any]:
+    def should_terminate_workflow(context: ExecutionContext) -> Dict[str, Any]:
         """
-        현재 컨텍스트를 기반으로 워크플로우 완료 준비 상태 확인
+        현재 컨텍스트를 기반으로 워크플로우 종료 여부 결정
         
         Args:
             context: 현재 실행 컨텍스트
             
         Returns:
-            Dict: 완료 준비 상태 정보
+            Dict: 워크플로우 종료 결정 정보
         """
         completion_status = {
-            "ready_to_complete": False,
-            "completion_type": None,
+            "should_terminate": False,
+            "termination_reason": None,
             "reason": "",
             "final_result": {}
         }
@@ -502,8 +502,8 @@ class AgentResultAnalyzer:
             
             if final_sql and execution_result:
                 completion_status.update({
-                    "ready_to_complete": True,
-                    "completion_type": "success",
+                    "should_terminate": True,
+                    "termination_reason": "success",
                     "reason": "SQL successfully generated and executed",
                     "final_result": {
                         "sql_query": final_sql,
@@ -516,8 +516,8 @@ class AgentResultAnalyzer:
         # 사용자 설명이 필요한 상황
         elif "clarification_needed" in context.completion_criteria_met:
             completion_status.update({
-                "ready_to_complete": True,
-                "completion_type": "clarification_needed",
+                "should_terminate": True,
+                "termination_reason": "clarification_needed",
                 "reason": "User clarification required",
                 "final_result": {
                     "clarification_questions": context.accumulated_insights.get("clarification_questions"),
@@ -528,8 +528,8 @@ class AgentResultAnalyzer:
         # 커뮤니케이션 완료 (오류 설명 등)
         elif "communication_completed" in context.completion_criteria_met:
             completion_status.update({
-                "ready_to_complete": True,
-                "completion_type": "explained",
+                "should_terminate": True,
+                "termination_reason": "explained",
                 "reason": "Issue explained to user",
                 "final_result": context.accumulated_insights
             })
@@ -537,8 +537,8 @@ class AgentResultAnalyzer:
         # SQL 생성 실패로 완료
         elif "sql_generation_failed" in context.completion_criteria_met:
             completion_status.update({
-                "ready_to_complete": True,
-                "completion_type": "sql_generation_failed",
+                "should_terminate": True,
+                "termination_reason": "sql_generation_failed",
                 "reason": "SQL generation failed, issue will be explained",
                 "final_result": context.accumulated_insights
             })
@@ -546,8 +546,8 @@ class AgentResultAnalyzer:
         # 너무 많은 Agent가 실행되었으면 강제 완료
         elif len(context.executed_agents) >= 10:
             completion_status.update({
-                "ready_to_complete": True,
-                "completion_type": "max_iterations_reached",
+                "should_terminate": True,
+                "termination_reason": "max_iterations_reached",
                 "reason": "Maximum number of agent executions reached",
                 "final_result": {
                     "partial_results": context.accumulated_insights,
@@ -558,8 +558,8 @@ class AgentResultAnalyzer:
         # 기본 완료 조건: 최소 2개 Agent가 실행되고 더 이상 제안이 없으면 완료
         elif len(context.executed_agents) >= 2:
             completion_status.update({
-                "ready_to_complete": True,
-                "completion_type": "workflow_completed",
+                "should_terminate": True,
+                "termination_reason": "workflow_completed",
                 "reason": f"Workflow completed with {len(context.executed_agents)} agents",
                 "final_result": context.accumulated_insights
             })
@@ -647,10 +647,10 @@ class DynamicOrchestrator:
                 iteration += 1
                 logger.info(f"Dynamic execution iteration {iteration}")
                 
-                # 완료 준비 상태 확인
-                completion_status = AgentResultAnalyzer.determine_completion_readiness(context)
-                if completion_status["ready_to_complete"]:
-                    logger.info(f"Workflow completion ready: {completion_status['reason']}")
+                # 워크플로우 종료 여부 확인
+                completion_status = AgentResultAnalyzer.should_terminate_workflow(context)
+                if completion_status["should_terminate"]:
+                    logger.info(f"Workflow should terminate: {completion_status['reason']}")
                     break
                 
                 # 가장 우선순위가 높은 필수 Agent 선택
@@ -678,11 +678,11 @@ class DynamicOrchestrator:
                     logger.error(f"Agent execution failed: {agent_result.error}")
                     current_suggestions = self._handle_agent_failure(agent_result, context)
             
-            # 최종 완료 상태 확인
-            final_completion_status = AgentResultAnalyzer.determine_completion_readiness(context)
+            # 최종 워크플로우 종료 상태 확인
+            final_completion_status = AgentResultAnalyzer.should_terminate_workflow(context)
             
-            # 디버깅: 완료 상태 로깅
-            logger.info(f"Final completion status: {final_completion_status['completion_type']}")
+            # 디버깅: 종료 상태 로깅
+            logger.info(f"Final termination reason: {final_completion_status['termination_reason']}")
             logger.info(f"Completion criteria met: {list(context.completion_criteria_met)}")
             logger.info(f"Accumulated insights keys: {list(context.accumulated_insights.keys())}")
             
@@ -691,8 +691,8 @@ class DynamicOrchestrator:
             
             # 실행 결과 구성
             result = {
-                "success": final_completion_status["ready_to_complete"],
-                "completion_type": final_completion_status["completion_type"],
+                "success": final_completion_status["should_terminate"],
+                "termination_reason": final_completion_status["termination_reason"],
                 "execution_time": execution_time,
                 "iterations": iteration,
                 "executed_agents": list(context.executed_agents),
@@ -711,7 +711,7 @@ class DynamicOrchestrator:
             }
             
             # 성공적인 완료를 위한 편의 필드 추가
-            if final_completion_status["completion_type"] == "success":
+            if final_completion_status["termination_reason"] == "success":
                 final_data = final_completion_status["final_result"]
                 result.update({
                     "sqlQuery": final_data.get("sql_query"),

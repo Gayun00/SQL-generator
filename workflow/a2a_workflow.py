@@ -93,7 +93,7 @@ class A2AWorkflow:
             result = await self.orchestrator.execute_dynamic_workflow(user_query)
             
             print(f"✅ 완전 동적 A2A 처리 완료! ({result.get('execution_time', 0):.2f}초)")
-            print(f"🎛️ 완료 유형: {result.get('completion_type', 'unknown')}")
+            print(f"🎛️ 완료 유형: {result.get('termination_reason', 'unknown')}")
             print(f"📊 실행된 Agent: {len(result.get('executed_agents', []))}개")
             print(f"🔄 반복 횟수: {result.get('iterations', 0)}회")
             
@@ -186,11 +186,11 @@ if __name__ == "__main__":
                     print("🎯 완전 동적 A2A 실행 결과:")
                     
                     if result.get("success"):
-                        completion_type = result.get("completion_type", "unknown")
+                        termination_reason = result.get("termination_reason", "unknown")
                         executed_agents = result.get("executed_agents", [])
                         iterations = result.get("iterations", 0)
                         
-                        print(f"✅ 성공 ({completion_type} 완료)")
+                        print(f"✅ 성공 ({termination_reason} 완료)")
                         print(f"📊 실행된 Agent: {', '.join(executed_agents)}")
                         print(f"🔄 동적 반복: {iterations}회")
                         
@@ -246,14 +246,14 @@ if __name__ == "__main__":
                 result = await workflow.process_query(query)
                 
                 if result.get("success"):
-                    completion_type = result.get("completion_type", "unknown")
+                    termination_reason = result.get("termination_reason", "unknown")
                     executed_agents = result.get("executed_agents", [])
                     iterations = result.get("iterations", 0)
                     
                     total_agents_used += len(executed_agents)
                     total_iterations += iterations
                     
-                    print(f"✅ 성공 - {completion_type} 완료")
+                    print(f"✅ 성공 - {termination_reason} 완료")
                     print(f"📊 사용된 Agent: {len(executed_agents)}개 ({', '.join(executed_agents)})")
                     print(f"🔄 동적 반복: {iterations}회")
                     
