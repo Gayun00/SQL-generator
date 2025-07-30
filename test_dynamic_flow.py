@@ -103,7 +103,7 @@ async def test_dynamic_flow_scenarios():
                                     for unc in uncertainties[:2]:
                                         print(f"           - {unc.get('type', 'unknown')}: {unc.get('description', 'N/A')[:50]}...")
                             
-                            elif task_name in ["simple_generation", "optimized_generation"]:
+                            elif task_name in ["generate_sql", "optimized_generation"]:
                                 sql_query = task_result.get("sql_query", "")
                                 query_result = task_result.get("query_result", {})
                                 

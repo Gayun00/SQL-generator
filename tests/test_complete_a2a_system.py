@@ -10,7 +10,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
-from agents.master_orchestrator import MasterOrchestrator, ExecutionContext
+from agents.dynamic_orchestrator import DynamicOrchestrator, ExecutionContext
 from workflow.state import SQLGeneratorState
 from db.bigquery_client import bq_client
 from rag.schema_embedder import schema_embedder
@@ -46,12 +46,12 @@ def initialize_test_environment():
         return False
 
 async def test_orchestrator_agent_coordination():
-    """MasterOrchestrator의 Agent 협력 테스트"""
-    print("\\n🧪 MasterOrchestrator Agent 협력 테스트")
+    """DynamicOrchestrator의 Agent 협력 테스트"""
+    print("\\n🧪 DynamicOrchestrator Agent 협력 테스트")
     print("-" * 60)
     
-    # MasterOrchestrator 생성
-    orchestrator = MasterOrchestrator()
+    # DynamicOrchestrator 생성
+    orchestrator = DynamicOrchestrator()
     
     # 모든 Agent 등록
     from agents.schema_analyzer_agent import create_schema_analyzer_agent
@@ -66,12 +66,6 @@ async def test_orchestrator_agent_coordination():
         create_user_communicator_agent()
     ]
     
-    # Agent 등록 확인
-    for agent in agents:
-        orchestrator.register_agent(agent)
-        print(f"✅ {agent.name} Agent 등록 완료")
-    
-    print(f"\\n📊 등록된 Agent 수: {len(orchestrator.agents)}")
     
     # 복잡한 SQL 요청으로 Agent 협력 테스트
     test_query = "최근 한 달간 가장 많이 주문한 상위 10명의 사용자와 그들의 총 주문 금액을 보여주세요"
@@ -88,21 +82,20 @@ async def test_orchestrator_agent_coordination():
         print(f"\\n🔄 복잡한 쿼리 처리 중...")
         print(f"쿼리: {test_query}")
         
-        result = await orchestrator.process_sql_request(context)
+        result = await orchestrator.execute_dynamic_workflow(test_query)
         
         print(f"\\n✅ Orchestrator 처리 완료!")
-        print(f"실행 계획: {result.get('execution_plan', {}).get('strategy', 'unknown')}")
-        print(f"참여 Agent: {len(result.get('results', {}))}개")
-        print(f"처리 시간: {result.get('total_processing_time', 0):.2f}초")
+        print(f"완료 타입: {result.get('termination_reason', 'unknown')}")
+        print(f"실행된 Agent: {len(result.get('executed_agents', []))}개")
+        print(f"처리 시간: {result.get('execution_time', 0):.2f}초")
         
         # 각 Agent의 결과 확인
-        results = result.get("results", {})
-        for phase_name, phase_result in results.items():
-            print(f"\\n📋 {phase_name}:")
-            for task_name, task_result in phase_result.items():
-                if isinstance(task_result, dict):
-                    status = "✅ 성공" if not task_result.get("error") else "❌ 실패"
-                    print(f"   {task_name}: {status}")
+        agent_results = result.get("agent_results", {})
+        for agent_name, agent_result in agent_results.items():
+            print(f"\\n📋 {agent_name}:")
+            if isinstance(agent_result, dict):
+                status = "✅ 성공" if not agent_result.get("error") else "❌ 실패"
+                print(f"   결과: {status}")
         
         return True
         
@@ -117,8 +110,8 @@ async def test_pure_a2a_workflow():
     print("\\n🧪 순수 A2A Workflow 테스트")
     print("-" * 60)
     
-    # MasterOrchestrator 생성
-    orchestrator = MasterOrchestrator()
+    # DynamicOrchestrator 생성
+    orchestrator = DynamicOrchestrator()
     
     # 모든 Agent 등록
     from agents.schema_analyzer_agent import create_schema_analyzer_agent
@@ -191,7 +184,7 @@ async def test_pure_a2a_workflow():
                 state=state
             )
             
-            result = await orchestrator.process_sql_request(context)
+            result = await orchestrator.execute_dynamic_workflow(test_case["query"])
             
             print(f"✅ 처리 완료!")
             print(f"   실행 계획: {result.get('execution_plan', {}).get('strategy', 'unknown')}")

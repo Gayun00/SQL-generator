@@ -80,7 +80,7 @@ async def test_simple_generation():
             receiver="sql_generator",
             message_type=MessageType.REQUEST,
             content={
-                "task_type": "simple_generation",
+                "task_type": "generate_sql",
                 "query": test_case["query"],
                 "context": {}
             }
@@ -241,7 +241,7 @@ async def test_agent_statistics():
             receiver="sql_generator", 
             message_type=MessageType.REQUEST,
             content={
-                "task_type": "simple_generation",
+                "task_type": "generate_sql",
                 "query": query
             }
         )
@@ -278,7 +278,7 @@ async def main():
     
     # 테스트 실행
     tests = [
-        ("단순 SQL 생성", test_simple_generation),
+        ("SQL 생성", test_simple_generation),
         ("최적화된 SQL 생성", test_optimized_generation), 
         ("Agent 통계", test_agent_statistics)
     ]

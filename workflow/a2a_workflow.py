@@ -22,7 +22,7 @@ from rag.schema_retriever import schema_retriever
 
 
 class A2AWorkflow:
-    """완전 동적 A2A 워크플로우 관리 클래스"""
+    """워크플로우 관리 클래스"""
     
     def __init__(self):
         self.orchestrator = None
@@ -30,7 +30,7 @@ class A2AWorkflow:
     
     async def initialize(self):
         """완전 동적 시스템 초기화"""
-        print("🔧 완전 동적 A2A 워크플로우 초기화 중...")
+        print("🔧 워크플로우 초기화 중...")
         
         try:
             # 스키마 정보 초기화
@@ -65,7 +65,7 @@ class A2AWorkflow:
                 print(f"✅ {agent.name} Agent 등록 완료")
             
             self.initialized = True
-            print("🎉 완전 동적 A2A 워크플로우 초기화 완료!")
+            print("🎉 워크플로우 초기화 완료!")
             return True
             
         except Exception as e:
@@ -92,7 +92,7 @@ class A2AWorkflow:
             # DynamicOrchestrator를 통한 완전 동적 A2A 실행
             result = await self.orchestrator.execute_dynamic_workflow(user_query)
             
-            print(f"✅ 완전 동적 A2A 처리 완료! ({result.get('execution_time', 0):.2f}초)")
+            print(f"✅ A2A 처리 완료! ({result.get('execution_time', 0):.2f}초)")
             print(f"🎛️ 완료 유형: {result.get('termination_reason', 'unknown')}")
             print(f"📊 실행된 Agent: {len(result.get('executed_agents', []))}개")
             print(f"🔄 반복 횟수: {result.get('iterations', 0)}회")
@@ -103,23 +103,23 @@ class A2AWorkflow:
             return result
             
         except Exception as e:
-            print(f"❌ 완전 동적 A2A 처리 실패: {str(e)}")
+            print(f"❌ A2A 처리 실패: {str(e)}")
             raise
     
     async def shutdown(self):
         """시스템 종료"""
         if self.orchestrator:
             await self.orchestrator.shutdown()
-        print("👋 A2A 워크플로우 종료 완료")
+        print("👋 워크플로우 종료")
 
 
 # 편의 함수들
 async def create_a2a_workflow():
-    """완전 동적 A2A 워크플로우 생성 및 초기화"""
+    """워크플로우 생성 및 초기화"""
     workflow = A2AWorkflow()
     success = await workflow.initialize()
     
     if not success:
-        raise Exception("완전 동적 A2A 워크플로우 초기화 실패")
+        raise Exception("워크플로우 초기화 실패")
     
     return workflow

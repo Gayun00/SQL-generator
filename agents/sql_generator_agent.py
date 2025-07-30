@@ -109,16 +109,10 @@ class SQLGeneratorAgent(BaseAgent):
             self.add_message_to_history(message)
             
             # 작업 타입에 따른 처리
-            task_type = message.content.get("task_type", "optimized_generation")
+            task_type = message.content.get("task_type", "generate_sql")
             
-            if task_type == "simple_generation":
-                result = await self._simple_generation(message.content)
-            elif task_type == "optimized_generation":
+            if task_type == "generate_sql":
                 result = await self._optimized_generation(message.content)
-            elif task_type == "draft_generation":
-                result = await self._draft_generation(message.content)
-            elif task_type == "final_optimization":
-                result = await self._final_optimization(message.content)
             elif task_type == "execute_with_improvements":
                 result = await self._execute_with_improvements(message.content)
             else:
@@ -131,63 +125,7 @@ class SQLGeneratorAgent(BaseAgent):
             logger.error(f"QueryArchitect Agent processing failed: {str(e)}")
             return self.create_error_message(message, e)
     
-    async def _simple_generation(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """단순 SQL 생성 - 빠른 처리용"""
-        query = input_data.get("query", "")
-        context = input_data.get("context", {})
-        
-        logger.info(f"QueryArchitect: Simple generation for query: '{query[:50]}...'")
-        
-        # 기본 RAG 검색
-        try:
-            relevant_context = schema_retriever.create_context_summary(query, max_tables=3)
-        except Exception as e:
-            logger.warning(f"RAG search failed: {str(e)}")
-            relevant_context = "스키마 정보를 가져올 수 없습니다."
-        
-        # 단순 SQL 생성 프롬프트
-        user_message = f"""
-        사용자 요청: {query}
-        
-        스키마 정보:
-        {relevant_context}
-        
-        단순하고 직관적인 BigQuery SQL 쿼리를 생성해주세요.
-        복잡한 최적화는 생략하고 기본적인 기능만 구현하세요.
-        
-        SQL 쿼리만 반환하세요.
-        """
-        
-        try:
-            start_time = datetime.now()
-            response_content = await self.send_llm_request(user_message)
-            processing_time = (datetime.now() - start_time).total_seconds()
-            
-            # SQL 정리
-            sql_query = self._clean_sql_response(response_content)
-            
-            # 통계 업데이트
-            self.performance_stats["simple_queries"] += 1
-            self._update_generation_stats(processing_time)
-            
-            result = {
-                "generation_type": "simple_generation",
-                "sql_query": sql_query,
-                "processing_time": processing_time,
-                "complexity": QueryComplexity.SIMPLE,
-                "optimization_applied": False,
-                "schema_context_used": relevant_context is not None
-            }
-            
-            # 생성 히스토리에 추가
-            self._add_to_generation_history(query, result)
-            
-            logger.info(f"Simple generation completed in {processing_time:.2f}s")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Simple generation failed: {str(e)}")
-            return self._create_fallback_result("simple_generation", str(e))
+
     
     async def _optimized_generation(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """최적화된 SQL 생성 - 표준 처리"""
@@ -273,69 +211,9 @@ class SQLGeneratorAgent(BaseAgent):
             logger.error(f"Optimized generation failed: {str(e)}")
             return self._create_fallback_result("optimized_generation", str(e))
     
-    async def _draft_generation(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """초안 생성 - 복잡한 쿼리용"""
-        query = input_data.get("query", "")
-        analysis_result = input_data.get("analysis_result", {})
-        
-        logger.info("QueryArchitect: Draft generation for complex query")
-        
-        # 다단계 접근법
-        # 1단계: 기본 구조 생성
-        basic_structure = await self._generate_basic_structure(query, analysis_result)
-        
-        # 2단계: JOIN 및 관계 추가
-        with_relationships = await self._add_table_relationships(basic_structure, analysis_result)
-        
-        # 3단계: 조건 및 필터 추가
-        complete_draft = await self._add_conditions_and_filters(with_relationships, query)
-        
-        result = {
-            "generation_type": "draft_generation",
-            "sql_query": complete_draft,
-            "processing_stages": ["basic_structure", "relationships", "conditions"],
-            "complexity": QueryComplexity.COMPLEX,
-            "requires_review": True
-        }
-        
-        return result
+
     
-    async def _final_optimization(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """최종 최적화 - 검토 후 개선"""
-        draft_sql = input_data.get("draft_sql", "")
-        feedback = input_data.get("feedback", {})
-        
-        logger.info("QueryArchitect: Final optimization started")
-        
-        # 피드백 기반 개선
-        optimization_prompt = f"""
-        초안 SQL: {draft_sql}
-        
-        검토 피드백: {feedback}
-        
-        피드백을 반영하여 SQL을 최적화해주세요.
-        특히 성능, 정확성, 가독성을 개선해주세요.
-        
-        최적화된 SQL 쿼리만 반환하세요.
-        """
-        
-        try:
-            response_content = await self.send_llm_request(optimization_prompt)
-            optimized_sql = self._clean_sql_response(response_content)
-            
-            result = {
-                "generation_type": "final_optimization",
-                "sql_query": optimized_sql,
-                "original_sql": draft_sql,
-                "feedback_applied": feedback,
-                "optimization_complete": True
-            }
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Final optimization failed: {str(e)}")
-            return {"generation_type": "final_optimization", "sql_query": draft_sql, "error": str(e)}
+
     
     def _build_exploration_context(self, exploration_result: Dict) -> str:
         """탐색 결과를 컨텍스트로 변환"""
