@@ -190,8 +190,8 @@ async def test_workflow_node_connections():
             
             # 간단한 테스트로 구조 확인
             try:
-                # A2A 워크플로우 구조 확인
-                agents = workflow_manager.get_available_agents()
+                # A2A 워크플로우 구조 확인 (디버깅용)
+                agents = workflow_manager.orchestrator._debug_get_available_agents()
                 if agents:
                     print(f"✅ 사용 가능한 Agent 수: {len(agents)}")
                     print("✅ A2A 워크플로우 구조 유효성 확인 완료")

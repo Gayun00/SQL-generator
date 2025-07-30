@@ -895,12 +895,12 @@ class DynamicOrchestrator:
                 (current_avg * (total - 1) + execution_time) / total
             )
     
-    def get_available_agents(self) -> List[str]:
-        """등록된 Agent 목록 반환"""
+    def _debug_get_available_agents(self) -> List[str]:
+        """[DEBUG] 등록된 Agent 목록 반환 (디버깅용)"""
         return list(self.agents.keys())
     
-    def get_system_status(self) -> Dict[str, Any]:
-        """시스템 상태 조회"""
+    def _debug_get_system_status(self) -> Dict[str, Any]:
+        """[DEBUG] 시스템 상태 조회 (디버깅용)"""
         agent_statuses = {}
         for name, agent in self.agents.items():
             agent_statuses[name] = agent.get_status()
