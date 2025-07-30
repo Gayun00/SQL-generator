@@ -214,7 +214,8 @@ class SchemaAnalyzerAgent(BaseAgent):
                 "analysis_type": "full_analysis",
                 "processing_time": processing_time,
                 "schema_context_used": relevant_context is not None,
-                "query_complexity": self._assess_query_complexity(query)
+                "query_complexity": self._assess_query_complexity(query),
+                "rag_context": relevant_context  # RAG 결과 포함
             })
             
             # 분석 히스토리에 추가

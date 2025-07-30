@@ -115,13 +115,9 @@ class AgentResultAnalyzer:
         """SchemaAnalyzer 결과 분석"""
         suggestions = []
         
-        # 분석 결과 추출
-        analysis_result = (
-            result_data.get("full_analysis") or 
-            result_data.get("quick_analysis") or 
-            result_data.get("deep_analysis") or
-            {}
-        )
+        # 분석 결과 추출 - result_data 자체가 분석 결과
+        analysis_result = result_data
+        
         
         if analysis_result.get("error"):
             # 분석 실패 시 커뮤니케이션 전문가에게 도움 요청
@@ -135,20 +131,21 @@ class AgentResultAnalyzer:
             ))
             return suggestions
         
-        uncertainty_analysis = analysis_result.get("uncertainty_analysis", {})
-        has_uncertainty = uncertainty_analysis.get("has_uncertainty", False)
-        confidence = uncertainty_analysis.get("confidence", 0.0)
+        # SchemaAnalyzer 응답에서 직접 불확실성 정보 추출
+        has_uncertainty = analysis_result.get("has_uncertainty", False)
+        confidence = analysis_result.get("confidence", 0.0)
+        uncertainties = analysis_result.get("uncertainties", [])
         
-        # 누적 인사이트 업데이트
+        # 누적 인사이트 업데이트 (RAG 컨텍스트 포함)
         context.accumulated_insights.update({
             "schema_analysis": analysis_result,
-            "uncertainty_level": uncertainty_analysis.get("uncertainty_level", "low"),
-            "confidence_score": confidence
+            "uncertainty_level": "high" if has_uncertainty else "low",
+            "confidence_score": confidence,
+            "rag_context": analysis_result.get("rag_context")  # RAG 결과 전달
         })
         
         # 불확실성이 있고 신뢰도가 낮으면 탐색 필요
         if has_uncertainty and confidence < 0.7:
-            uncertainties = uncertainty_analysis.get("uncertainties", [])
             suggestions.append(NextAgentSuggestion(
                 agent_name="data_explorer",
                 task_type="explore_uncertainties",
@@ -172,7 +169,8 @@ class AgentResultAnalyzer:
                 input_data={
                     "schema_analysis": analysis_result,
                     "query": context.query,
-                    "context": context.accumulated_insights
+                    "context": context.accumulated_insights,
+                    "rag_context": analysis_result.get("rag_context")  # RAG 컨텍스트 전달
                 },
                 required=True
             ))
@@ -186,7 +184,7 @@ class AgentResultAnalyzer:
                     priority=2,
                     reason=f"Medium confidence, quick exploration recommended",
                     input_data={
-                        "uncertainties": uncertainty_analysis.get("uncertainties", []),
+                        "uncertainties": uncertainties,
                         "schema_analysis": analysis_result
                     }
                 ),
@@ -197,7 +195,8 @@ class AgentResultAnalyzer:
                     reason="Alternative: proceed with current analysis",
                     input_data={
                         "schema_analysis": analysis_result,
-                        "query": context.query
+                        "query": context.query,
+                        "rag_context": analysis_result.get("rag_context")  # RAG 컨텍스트 전달
                     }
                 )
             ])
@@ -256,7 +255,8 @@ class AgentResultAnalyzer:
                     "schema_analysis": context.accumulated_insights.get("schema_analysis"),
                     "exploration_results": exploration_result,
                     "query": context.query,
-                    "context": context.accumulated_insights
+                    "context": context.accumulated_insights,
+                    "rag_context": context.accumulated_insights.get("rag_context")  # RAG 컨텍스트 전달
                 },
                 required=True
             ))
@@ -351,7 +351,8 @@ class AgentResultAnalyzer:
                         "failed_sql": generation_result.get("attempted_sql"),
                         "error_message": error_msg,
                         "original_query": context.query,
-                        "context": context.accumulated_insights
+                        "context": context.accumulated_insights,
+                        "rag_context": context.accumulated_insights.get("rag_context")  # RAG 컨텍스트 전달
                     },
                     required=True
                 ))
@@ -434,7 +435,8 @@ class AgentResultAnalyzer:
                         "sql_query": sql_query,
                         "error_message": error_message,
                         "original_query": context.query,
-                        "context": context.accumulated_insights
+                        "context": context.accumulated_insights,
+                        "rag_context": context.accumulated_insights.get("rag_context")  # RAG 컨텍스트 전달
                     },
                     required=True
                 ))

@@ -136,12 +136,18 @@ class SQLGeneratorAgent(BaseAgent):
         
         logger.info(f"SqlGenerator: Optimized generation started")
         
-        # 확장된 RAG 검색
-        try:
-            relevant_context = schema_retriever.create_context_summary(query, max_tables=5)
-        except Exception as e:
-            logger.warning(f"Extended RAG search failed: {str(e)}")
-            relevant_context = "스키마 정보를 가져올 수 없습니다."
+        # 전달받은 RAG 컨텍스트 사용 (중복 호출 방지)
+        relevant_context = input_data.get("rag_context")
+        if not relevant_context:
+            # 전달받은 컨텍스트가 없는 경우에만 RAG 호출
+            try:
+                relevant_context = schema_retriever.create_context_summary(query, max_tables=5)
+                logger.info("RAG context not provided, performing fresh RAG search")
+            except Exception as e:
+                logger.warning(f"RAG search failed: {str(e)}")
+                relevant_context = "스키마 정보를 가져올 수 없습니다."
+        else:
+            logger.info("Using pre-fetched RAG context from SchemaAnalyzer")
         
         # 탐색 결과 컨텍스트 생성
         exploration_context = self._build_exploration_context(exploration_result)
