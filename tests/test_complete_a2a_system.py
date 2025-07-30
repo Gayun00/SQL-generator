@@ -350,8 +350,8 @@ async def main():
         
         print("\\n📋 순수 A2A 시스템 구성:")
         print("   1. 🧠 SchemaIntelligence Agent - 스키마 분석 및 불확실성 탐지")
-        print("   2. 🏗️  QueryArchitect Agent - SQL 설계, 최적화 및 자동 개선")
-        print("   3. 🔍 DataInvestigator Agent - 데이터 탐색 및 불확실성 해결") 
+        print("   2. 🏗️  SqlGenerator Agent - SQL 설계, 최적화 및 자동 개선")
+        print("   3. 🔍 DataExplorer Agent - 데이터 탐색 및 불확실성 해결") 
         print("   4. 💬 CommunicationSpecialist Agent - 사용자 커뮤니케이션")
         print("   5. 🎛️  MasterOrchestrator - 중앙 집중식 Agent 조정 및 통신 관리")
         

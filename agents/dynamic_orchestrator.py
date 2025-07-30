@@ -311,11 +311,11 @@ class AgentResultAnalyzer:
         """SQLGenerator 결과 분석"""
         suggestions = []
         
-        # QueryArchitect 결과는 직접 result_data에 포함됨
+        # SqlGenerator 결과는 직접 result_data에 포함됨
         generation_result = result_data
         
-        # 디버깅: QueryArchitect 결과 로깅
-        logger.info(f"QueryArchitect result keys: {list(result_data.keys())}")
+        # 디버깅: SqlGenerator 결과 로깅
+        logger.info(f"SqlGenerator result keys: {list(result_data.keys())}")
         logger.info(f"SQL query: {result_data.get('sql_query', 'None')[:100] if result_data.get('sql_query') else 'None'}")
         if 'execution_result' in result_data:
             logger.info(f"Execution result: {result_data.get('execution_result')}")

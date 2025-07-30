@@ -58,7 +58,6 @@ class DataExplorerAgent(BaseAgent):
             "uncertainty_resolution_rate": 0.0
         }
         
-        logger.info(f"DataInvestigator Agent initialized with specialization: {self.specialization}")
     
     def get_system_prompt(self) -> str:
         """데이터 탐색 전문 시스템 프롬프트"""
@@ -109,23 +108,24 @@ class DataExplorerAgent(BaseAgent):
             
             # 작업 타입에 따른 처리
             task_type = message.content.get("task_type", "uncertainty_exploration")
+            input_data = message.content.get("input_data", {})
             
             if task_type == "uncertainty_exploration":
-                result = await self._uncertainty_exploration(message.content)
+                result = await self._uncertainty_exploration(input_data)
             elif task_type == "data_discovery":
-                result = await self._data_discovery(message.content)
+                result = await self._data_discovery(input_data)
             elif task_type == "relationship_analysis":
-                result = await self._relationship_analysis(message.content)
+                result = await self._relationship_analysis(input_data)
             elif task_type == "statistical_analysis":
-                result = await self._statistical_analysis(message.content)
+                result = await self._statistical_analysis(input_data)
             else:
-                result = await self._uncertainty_exploration(message.content)  # 기본값
+                result = await self._uncertainty_exploration(input_data)  # 기본값
             
             # 성공 응답 생성
             return self.create_response_message(message, result)
             
         except Exception as e:
-            logger.error(f"DataInvestigator Agent processing failed: {str(e)}")
+            logger.error(f"DataExplorer Agent processing failed: {str(e)}")
             return self.create_error_message(message, e)
     
     async def _uncertainty_exploration(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -133,7 +133,7 @@ class DataExplorerAgent(BaseAgent):
         uncertainties = input_data.get("uncertainties", [])
         query = input_data.get("query", "")
         
-        logger.info(f"DataInvestigator: Uncertainty exploration for {len(uncertainties)} items")
+        logger.info(f"DataExplorer: Uncertainty exploration for {len(uncertainties)} items")
         
         if not uncertainties:
             return {
@@ -316,7 +316,7 @@ class DataExplorerAgent(BaseAgent):
         query = input_data.get("query", "")
         tables = input_data.get("tables", [])
         
-        logger.info("DataInvestigator: General data discovery started")
+        logger.info("DataExplorer: General data discovery started")
         
         discovery_results = {
             "exploration_type": "data_discovery",
@@ -367,7 +367,7 @@ class DataExplorerAgent(BaseAgent):
     
     async def _relationship_analysis(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """테이블 간 관계 분석"""
-        logger.info("DataInvestigator: Relationship analysis started")
+        logger.info("DataExplorer: 테이블간 관계 분석")
         
         # 관계 분석 로직 구현
         return {
@@ -378,7 +378,7 @@ class DataExplorerAgent(BaseAgent):
     
     async def _statistical_analysis(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """통계적 분석"""
-        logger.info("DataInvestigator: Statistical analysis started")
+        logger.info("DataExplorer: 통계 분석")
         
         # 통계 분석 로직 구현
         return {

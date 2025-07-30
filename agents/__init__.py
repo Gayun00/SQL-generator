@@ -8,5 +8,5 @@ A2A (Agent-to-Agent) System for SQL Generator
 - BaseAgent: 모든 Agent의 기본 클래스
 - MasterOrchestrator: 중앙 제어 및 조정
 - Communication Hub: Agent 간 메시지 라우팅
-- 전문 Agent들: SchemaIntelligence, QueryArchitect, DataInvestigator, CommunicationSpecialist
+- 전문 Agent들: SchemaIntelligence, SqlGenerator, DataExplorer, CommunicationSpecialist
 """

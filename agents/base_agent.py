@@ -95,7 +95,6 @@ class BaseAgent(ABC):
             "last_activity": None
         }
         
-        logger.info(f"Agent '{self.name}' initialized with specialization: {self.specialization}")
     
     def _initialize_llm(self) -> ChatOpenAI:
         """Agent별 최적화된 LLM 초기화"""
@@ -159,11 +158,11 @@ class BaseAgent(ABC):
             response_time = (end_time - start_time).total_seconds()
             self._update_performance_metrics(True, response_time)
             
-            logger.info(f"Agent '{self.name}' processed request in {response_time:.2f}s")
+            logger.info(f"Agent '{self.name}' 요청 처리 완료 ({response_time:.2f}초)")
             return response.content
             
         except Exception as e:
-            logger.error(f"Agent '{self.name}' LLM request failed: {str(e)}")
+            logger.error(f"Agent '{self.name}' LLM request 실패: {str(e)}")
             self._update_performance_metrics(False, 0)
             raise
     

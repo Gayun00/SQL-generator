@@ -60,7 +60,7 @@ async def test_table_relationship_uncertainty():
 async def test_data_range_uncertainty():
     """DEPRECATED: 데이터 범위 불확실성 테스트 (A2A 전환으로 비활성화됨)"""
     print("\n⚠️ Langgraph 기반 데이터 범위 불확실성 테스트는 더 이상 지원되지 않습니다.")
-    print("   A2A 시스템에서는 DataInvestigator Agent가 범위 분석을 담당합니다.")
+    print("   A2A 시스템에서는 DataExplorer Agent가 범위 분석을 담당합니다.")
     print("   test_dynamic_flow.py를 사용하여 A2A 동적 데이터 탐색을 테스트하세요.")
     return True
 
