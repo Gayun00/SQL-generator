@@ -3,7 +3,7 @@ import random
 
 # Mock Schema Retriever (실제 rag/schema_retriever.py의 역할을 시뮬레이션)
 class MockSchemaRetriever:
-    def get_relevant_tables_with_threshold(self, query: str, similarity_threshold: float) -> List[Dict]:
+    async def get_relevant_tables_with_threshold(self, query: str, similarity_threshold: float) -> List[Dict]:
         print(f"[Schema Retriever] Searching for: '{query}' with threshold {similarity_threshold}")
         query_lower = query.lower()
         
@@ -50,18 +50,16 @@ class SchemaAnalyzer:
         return self.session_contexts[session_id]
 
     def _is_sufficient_schema_info(self, tables: List[Dict], query: str) -> bool:
-        """스키마 정보가 충분한지 판단하는 로직 (LLM 기반 판단 시뮬레이션)"""
         print("[Schema Analyzer] Evaluating schema sufficiency...")
         if not tables:
             return False
 
-        # 너무 많은 테이블이 검색된 경우 (모호성)
         if len(tables) > 2 and ("매출" in query or "sales" in query):
             print("[Schema Analyzer] Too many tables found for ambiguous query.")
             return False
 
         avg_relevance = sum(t["relevance"] for t in tables) / len(tables)
-        if avg_relevance < 0.7: # 임계값 조정 가능
+        if avg_relevance < 0.7:
             print(f"[Schema Analyzer] Average relevance ({avg_relevance:.2f}) is too low.")
             return False
 
@@ -88,14 +86,14 @@ class SchemaAnalyzer:
             })
         return formatted
 
-    def process(self, message: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, message: Dict[str, Any]) -> Dict[str, Any]:
         session_id = message["session_id"]
         context = self._get_context(session_id)
         context["conversation_history"].append(message)
 
         query = message["content"]["query"]
         
-        tables = self.schema_retriever.get_relevant_tables_with_threshold(
+        tables = await self.schema_retriever.get_relevant_tables_with_threshold(
             query,
             similarity_threshold=0.6
         )
