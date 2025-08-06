@@ -426,24 +426,7 @@ class SQLGeneratorAgent(BaseAgent):
         
         return QueryComplexity.SIMPLE
     
-    def _detect_applied_optimizations(self, sql_query: str) -> List[str]:
-        """적용된 최적화 기법 탐지"""
-        optimizations = []
-        sql_lower = sql_query.lower()
-        
-        if "limit" in sql_lower:
-            optimizations.append("result_limiting")
-        
-        if "where" in sql_lower and ("=" in sql_lower or "in" in sql_lower):
-            optimizations.append("indexed_filtering")
-        
-        if "join" in sql_lower:
-            optimizations.append("join_optimization")
-        
-        if any(pattern in sql_lower for pattern in ["timestamp", "date", "datetime"]):
-            optimizations.append("temporal_optimization")
-        
-        return optimizations
+    
     
     def _calculate_confidence(self, sql_query: str, analysis_result: Dict) -> float:
         """생성된 SQL의 신뢰도 계산"""
@@ -469,33 +452,8 @@ class SQLGeneratorAgent(BaseAgent):
         
         return min(max(confidence, 0.0), 1.0)
     
-    async def _generate_basic_structure(self, query: str, analysis: Dict) -> str:
-        """기본 SQL 구조 생성"""
-        prompt = f"""
-        사용자 요청: {query}
-        
-        기본적인 SELECT 구조만 생성해주세요.
-        복잡한 JOIN이나 조건은 제외하고 핵심 테이블과 컬럼만 포함하세요.
-        
-        SQL 쿼리만 반환하세요.
-        """
-        
-        response = await self.send_llm_request(prompt)
-        return self._clean_sql_response(response)
+
     
-    async def _add_table_relationships(self, basic_sql: str, analysis: Dict) -> str:
-        """테이블 관계 추가"""
-        prompt = f"""
-        기본 SQL: {basic_sql}
-        
-        필요한 JOIN을 추가해주세요.
-        테이블 간 관계를 정확히 파악하여 적절한 JOIN 조건을 설정하세요.
-        
-        개선된 SQL 쿼리만 반환하세요.
-        """
-        
-        response = await self.send_llm_request(prompt)
-        return self._clean_sql_response(response)
     
     async def _add_conditions_and_filters(self, sql_with_joins: str, original_query: str) -> str:
         """조건 및 필터 추가"""

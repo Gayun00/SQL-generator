@@ -1,38 +1,51 @@
 """
 UserCommunicator Agent - 사용자 커뮤니케이션 및 재질문 전문 Agent
 
-기존 sql_clarifier 노드를 Agent로 변환하여 사용자와의 소통,
-불확실성 해결을 위한 재질문, 명확한 요구사항 파악에 특화된 지능형 Agent로 구현했습니다.
+간소화된 3단계 플로우로 구현:
+1. generate_question: 질문 생성
+2. wait_for_answer: 사용자 응답 대기  
+3. finalize: 최종 결과 정리
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Literal
 import logging
 from datetime import datetime
 import json
+from dataclasses import dataclass, asdict
 
-from .base_agent import BaseAgent, AgentMessage, MessageType, AgentConfig, create_agent_config
-from langchain.schema import HumanMessage, SystemMessage
+# 직접 실행시 import 오류 방지를 위한 경로 설정
+import sys
+import os
+if __name__ == "__main__":
+    # 프로젝트 루트를 Python 경로에 추가
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, project_root)
+
+from agents.simple_base_agent import SimpleBaseAgent, AgentMessage, MessageType, AgentConfig, create_agent_config
 
 logger = logging.getLogger(__name__)
 
-class CommunicationType:
-    """커뮤니케이션 타입 분류"""
-    CLARIFICATION = "clarification"         # 재질문 및 명확화
-    VALIDATION = "validation"               # 입력 검증
-    EXPLANATION = "explanation"             # 설명 및 안내
-    FEEDBACK = "feedback"                   # 피드백 처리
-    INSTRUCTION = "instruction"             # 사용법 안내
+@dataclass
+class UserCommunicatorInput:
+    """UserCommunicator 입력 데이터 구조"""
+    step: Literal["generate_question", "wait_for_answer", "finalize"]
+    source: Literal["user", "sql_generator", "data_explorer"]
+    userInput: Optional[str] = None
+    agentRequest: Optional[Dict[str, Any]] = None  # {"missingFields": [], "reason": ""}
+    userReply: Optional[str] = None
 
-class QuestionCategory:
-    """질문 카테고리"""
-    COLUMN_VALUES = "column_values"         # 컬럼 값 관련
-    TABLE_RELATIONSHIP = "table_relationship"  # 테이블 관계
-    DATA_RANGE = "data_range"              # 데이터 범위
-    BUSINESS_LOGIC = "business_logic"       # 비즈니스 로직
-    SCHEMA_AMBIGUITY = "schema_ambiguity"   # 스키마 모호성
+@dataclass 
+class UserCommunicatorOutput:
+    """UserCommunicator 출력 데이터 구조"""
+    step: Literal["wait_for_answer", "finalize"]
+    questions: List[str]
+    originalSource: Literal["user", "sql_generator", "data_explorer"]
+    userReply: Optional[str] = None
+    finalizedInput: Optional[str] = None
+    nextAgentHint: Optional[str] = None
 
-class UserCommunicatorAgent(BaseAgent):
-    """사용자 커뮤니케이션 및 재질문 전문 Agent"""
+class UserCommunicatorAgent(SimpleBaseAgent):
+    """사용자 커뮤니케이션 및 재질문 전문 Agent - 간소화된 버전"""
     
     def __init__(self, config: Optional[AgentConfig] = None):
         if config is None:
@@ -40,350 +53,307 @@ class UserCommunicatorAgent(BaseAgent):
                 name="user_communicator",
                 specialization="user_communication_clarification",
                 model="gpt-4",
-                temperature=0.3,  # 창의적이면서도 일관된 소통
+                temperature=0.3,
                 max_tokens=1000
             )
         
         super().__init__(config)
-        
-        # 커뮤니케이션 전용 설정
-        self.communication_strategies = {
-            CommunicationType.CLARIFICATION: "불확실성 해결을 위한 구체적 재질문",
-            CommunicationType.VALIDATION: "사용자 입력의 유효성 검증 및 안내",
-            CommunicationType.EXPLANATION: "시스템 동작 및 결과 설명",
-            CommunicationType.FEEDBACK: "사용자 피드백 처리 및 개선사항 제안",
-            CommunicationType.INSTRUCTION: "SQL 생성 시스템 사용법 안내"
-        }
-        
-        # 성능 추적
-        self.communication_history = []
-        self.communication_stats = {
-            "total_interactions": 0,
-            "clarifications_generated": 0,
-            "validations_performed": 0,
-            "successful_resolutions": 0,
-            "avg_response_time": 0.0,
-            "user_satisfaction_score": 0.0
-        }
-        
-        logger.info(f"CommunicationSpecialist Agent initialized with specialization: {self.specialization}")
+        logger.info(f"UserCommunicator Agent initialized")
     
     def get_system_prompt(self) -> str:
         """사용자 커뮤니케이션 전문 시스템 프롬프트"""
-        return f"""
-        당신은 사용자 커뮤니케이션 및 재질문 전문 AI Agent입니다.
-        
-        **전문 분야:**
-        - 자연어 SQL 요청의 유효성 검증
-        - 불확실성 해결을 위한 효과적인 재질문 생성
-        - 사용자 친화적인 설명 및 안내 제공
-        - 복잡한 요구사항의 명확화 및 구조화
+        return """
+        당신은 사용자 커뮤니케이션 전문 AI Agent입니다.
         
         **핵심 역할:**
-        1. 사용자 입력의 유효성 검증 및 품질 평가
-        2. 해결되지 않은 불확실성에 대한 구체적 재질문 생성
-        3. 시스템 결과에 대한 명확한 설명 제공
-        4. 사용자 경험 개선을 위한 피드백 처리
+        1. 사용자의 자연어 요청을 분석하여 모호한 부분 식별
+        2. 다른 에이전트의 기술적 요청을 사용자 친화적 질문으로 변환
+        3. 사용자 응답을 정리하여 다음 단계로 전달
         
-        **커뮤니케이션 원칙:**
-        - 사용자 친화적이고 이해하기 쉬운 언어 사용
-        - 구체적이고 실행 가능한 질문 생성
-        - 예시와 선택지를 포함한 명확한 안내
-        - 점진적이고 체계적인 정보 수집
-        - 사용자의 맥락과 의도 파악 우선
-        
-        **질문 생성 전략:**
+        **질문 생성 원칙:**
+        - 명확하고 이해하기 쉬운 언어 사용
+        - 구체적인 선택지 제공
         - 한 번에 1-3개의 핵심 질문만 제시
-        - 선택지나 예시를 포함하여 답변 용이성 극대화
-        - 불확실성 타입별 맞춤형 질문 전략 적용
-        - 사용자의 도메인 지식 수준 고려
-        - 비즈니스 맥락과 연결된 실용적 질문
-        
-        **품질 보장:**
-        - 응답 시간: 평균 1-2초 목표
-        - 질문 명확도: 95% 이상 목표
-        - 불확실성 해결률: 85% 이상 목표
-        - 사용자 만족도: 4.5/5.0 이상 목표
+        - 예시 포함하여 답변 용이성 극대화
         """
     
     async def process_message(self, message: AgentMessage) -> AgentMessage:
-        """메시지 처리 - 커뮤니케이션 작업 수행"""
+        """메시지 처리 - 3단계 플로우"""
         try:
-            # 입력 유효성 검증
-            if not await self.validate_input(message):
-                return self.create_error_message(message, ValueError("Invalid input message"))
+            # 입력 데이터 파싱
+            content = message.content
+            input_data = UserCommunicatorInput(
+                step=content.get("step"),
+                source=content.get("source"), 
+                userInput=content.get("userInput"),
+                agentRequest=content.get("agentRequest"),
+                userReply=content.get("userReply")
+            )
             
-            # 메시지 히스토리에 추가
-            self.add_message_to_history(message)
-            
-            # 작업 타입에 따른 처리
-            task_type = message.content.get("task_type", "generate_clarification")
-            input_data = message.content.get("input_data", {})
-            
-            if task_type == "generate_clarification":
-                result = await self._generate_clarification(input_data)
-            elif task_type == "validate_input":
-                result = await self._validate_input(input_data)
-            elif task_type == "explain_result":
-                result = await self._explain_result(input_data)
-            elif task_type == "process_feedback":
-                result = await self._process_feedback(input_data)
+            # 단계별 처리
+            if input_data.step == "generate_question":
+                result = await self._generate_question(input_data)
+            elif input_data.step == "wait_for_answer":
+                result = await self._wait_for_answer(input_data)
+            elif input_data.step == "finalize":
+                result = await self._finalize(input_data)
             else:
-                result = await self._generate_clarification(input_data)  # 기본값
+                raise ValueError(f"Unknown step: {input_data.step}")
             
-            # 성공 응답 생성
-            return self.create_response_message(message, result)
+            # 결과 반환
+            return self.create_response_message(message, asdict(result))
             
         except Exception as e:
-            logger.error(f"CommunicationSpecialist Agent processing failed: {str(e)}")
+            logger.error(f"UserCommunicator processing failed: {str(e)}")
             return self.create_error_message(message, e)
     
-    async def _generate_clarification(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """불확실성 해결을 위한 재질문 생성 - 표준 처리"""
-        unresolved_uncertainties = input_data.get("unresolved_uncertainties", [])
-        original_query = input_data.get("original_query", "")
-        exploration_results = input_data.get("exploration_results", {})
+    async def _generate_question(self, input_data: UserCommunicatorInput) -> UserCommunicatorOutput:
+        """질문 생성 단계"""
+        logger.info(f"Generating question for source: {input_data.source}")
         
-        logger.info(f"CommunicationSpecialist: Generating clarification for {len(unresolved_uncertainties)} uncertainties")
+        if input_data.source == "user":
+            return await self._handle_user_input(input_data.userInput, input_data.source)
+        elif input_data.source == "sql_generator":
+            return await self._handle_agent_request(input_data.agentRequest, input_data.source)
+        elif input_data.source == "data_explorer":
+            return await self._handle_agent_request(input_data.agentRequest, input_data.source)
+        else:
+            raise ValueError(f"Unknown source: {input_data.source}")
+    
+    async def _wait_for_answer(self, input_data: UserCommunicatorInput) -> UserCommunicatorOutput:
+        """사용자 응답 대기 단계 (실제 구현에서는 UI와 연동)"""
+        return UserCommunicatorOutput(
+            step="finalize",
+            questions=[],
+            originalSource=input_data.source,
+            userReply=input_data.userReply
+        )
+    
+    async def _finalize(self, input_data: UserCommunicatorInput) -> UserCommunicatorOutput:
+        """최종 정리 단계"""
+        logger.info("Finalizing user communication")
         
-        if not unresolved_uncertainties:
-            return {
-                "communication_type": "clarification",
-                "needs_clarification": False,
-                "questions": [],
-                "summary": "모든 불확실성이 해결되어 추가 질문이 필요하지 않습니다.",
-                "confidence": 1.0
-            }
+        # 사용자 응답을 바탕으로 최종 입력 정리
+        finalized_input = await self._create_finalized_input(
+            input_data.userReply,
+            input_data.source
+        )
         
-        start_time = datetime.now()
+        # 다음 에이전트 힌트 결정
+        next_hint = self._determine_next_agent(input_data.source)
         
-        # 재질문 생성 프롬프트
-        uncertainties_summary = self._format_uncertainties_for_prompt(unresolved_uncertainties)
-        exploration_summary = self._format_exploration_results(exploration_results)
+        return UserCommunicatorOutput(
+            step="finalize",
+            questions=[],
+            originalSource=input_data.source,
+            userReply=input_data.userReply,
+            finalizedInput=finalized_input,
+            nextAgentHint=next_hint
+        )
+    
+    async def _handle_user_input(self, user_input: str, source: str) -> UserCommunicatorOutput:
+        """사용자 초기 입력 처리"""
+        # 1단계: 입력 유효성 검사
+        if not self._is_valid_user_input(user_input):
+            return UserCommunicatorOutput(
+                step="wait_for_answer",
+                questions=["유효한 질문을 입력해주세요"],
+                originalSource=source
+            )
         
+        # 2단계: 모호성 분석
         system_prompt = f"""
-        사용자의 SQL 요청에서 해결되지 않은 불확실성이 있습니다.
+        사용자의 자연어 요청을 분석하여 SQL 생성에 필요한 추가 정보가 있는지 판단하세요.
         
-        원래 요청: {original_query}
+        사용자 요청: {user_input}
         
-        해결되지 않은 문제들:
-        {uncertainties_summary}
+        다음 사항들을 확인해보세요:
+        1. 날짜/기간 정보가 필요한가?
+        2. 정렬 방식이 명시되었는가?  
+        3. 필터링 조건이 명확한가?
+        4. 집계 방식이 명확한가?
         
-        탐색 결과:
-        {exploration_summary}
-        
-        이 문제들을 해결하기 위해 사용자에게 구체적이고 명확한 질문을 생성하세요.
-        
-        질문 생성 가이드라인:
-        1. 구체적이고 이해하기 쉬운 질문
-        2. 예시를 포함하여 사용자가 쉽게 답할 수 있도록 함
-        3. 한 번에 너무 많은 질문을 하지 말고 가장 중요한 것부터
-        4. 선택지를 제공할 수 있으면 제공
-        5. 비즈니스 맥락을 고려한 실용적 질문
+        추가 정보가 필요하면 사용자 친화적인 질문을 생성하세요.
         
         응답 형식 (JSON):
         {{
-            "questions": [
-                {{
-                    "question": "구체적인 질문",
-                    "context": "질문의 배경 설명",
-                    "examples": ["예시1", "예시2"],
-                    "options": ["선택지1", "선택지2"] (선택사항),
-                    "uncertainty_type": "column_values|table_relationship|data_range|business_logic|schema_ambiguity",
-                    "priority": "high|medium|low"
-                }}
-            ],
-            "summary": "전체 질문의 목적과 기대효과",
-            "interaction_type": "clarification"
+            "needs_clarification": true/false,
+            "questions": ["질문1", "질문2", ...],
+            "reason": "추가 정보가 필요한 이유"
         }}
         """
         
         try:
             response_content = await self.send_llm_request(system_prompt)
-            processing_time = (datetime.now() - start_time).total_seconds()
+            parsed_response = self._parse_json_response(response_content)
             
-            # JSON 파싱
-            clarification_data = self._parse_json_response(response_content)
+            if parsed_response and parsed_response.get("needs_clarification", False):
+                questions = parsed_response.get("questions", [])
+            else:
+                questions = []
             
-            if not clarification_data:
-                # 파싱 실패시 기본 질문 생성
-                clarification_data = self._generate_fallback_questions(unresolved_uncertainties)
-            
-            # 결과 구성
-            result = {
-                "communication_type": "clarification",
-                "needs_clarification": True,
-                "questions": clarification_data.get("questions", []),
-                "summary": clarification_data.get("summary", "추가 정보가 필요합니다."),
-                "interaction_type": clarification_data.get("interaction_type", "clarification"),
-                "processing_time": processing_time,
-                "confidence": self._calculate_question_quality(clarification_data.get("questions", []))
-            }
-            
-            # 통계 업데이트
-            self._update_communication_stats("clarification", processing_time, True)
-            
-            logger.info(f"Clarification generated with {len(result['questions'])} questions")
-            return result
+            return UserCommunicatorOutput(
+                step="wait_for_answer" if questions else "finalize",
+                questions=questions,
+                originalSource=source,
+                finalizedInput=user_input if not questions else None
+            )
             
         except Exception as e:
-            logger.error(f"Clarification generation failed: {str(e)}")
-            return self._create_error_response("clarification", str(e))
+            logger.error(f"User input handling failed: {str(e)}")
+            # 폴백: 기본 질문 생성
+            return UserCommunicatorOutput(
+                step="wait_for_answer",
+                questions=["어떤 기간의 데이터를 조회하시겠어요?"],
+                originalSource=source
+            )
     
-    async def _validate_input(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """사용자 입력 유효성 검증"""
-        user_input = input_data.get("user_input", "")
-        
-        logger.info("CommunicationSpecialist: Validating user input")
+    async def _handle_agent_request(self, agent_request: Dict[str, Any], source: str) -> UserCommunicatorOutput:
+        """다른 에이전트의 요청 처리"""
+        missing_fields = agent_request.get("missingFields", [])
+        reason = agent_request.get("reason", "")
         
         system_prompt = f"""
-        사용자의 입력이 SQL 쿼리 생성을 위한 유효한 요청인지 판단하세요.
+        다른 에이전트가 다음과 같은 정보를 요청했습니다:
         
-        유효한 예시:
-        - "사용자별 주문 횟수를 조회해줘"
-        - "지난달 매출 합계를 구하는 쿼리 만들어줘"
-        - "상품별 재고량이 10개 미만인 데이터를 찾아줘"
+        필요한 정보: {missing_fields}
+        이유: {reason}
         
-        무효한 예시:
-        - "안녕하세요" (인사)
-        - "날씨가 어때?" (관련 없는 질문)
-        - 너무 모호하거나 데이터 조회와 관련 없는 요청
+        이를 사용자가 이해하기 쉬운 질문으로 변환하세요.
+        기술적 용어는 피하고 구체적인 예시나 선택지를 제공하세요.
         
         응답 형식 (JSON):
         {{
-            "is_valid": true/false,
-            "confidence": 0.0-1.0,
-            "reason": "판단 이유",
-            "suggestions": ["개선 제안1", "제안2"] (무효한 경우)
+            "questions": ["사용자 친화적 질문1", "질문2", ...],
+            "explanation": "왜 이 정보가 필요한지 간단한 설명"
         }}
         """
         
-        user_message = f"사용자 입력: {user_input}"
-        
         try:
-            start_time = datetime.now()
-            response_content = await self.send_llm_request(system_prompt + "\n\n" + user_message)
-            processing_time = (datetime.now() - start_time).total_seconds()
+            response_content = await self.send_llm_request(system_prompt)
+            parsed_response = self._parse_json_response(response_content)
             
-            validation_data = self._parse_json_response(response_content)
+            questions = parsed_response.get("questions", []) if parsed_response else []
             
-            if not validation_data:
-                # 파싱 실패시 기본 검증
-                validation_data = {
-                    "is_valid": len(user_input.strip()) > 5,
-                    "confidence": 0.5,
-                    "reason": "입력 검증 처리 중 오류가 발생했습니다.",
-                    "suggestions": ["더 구체적인 데이터 조회 요청을 입력해주세요."]
-                }
+            if not questions:
+                # 폴백 질문 생성
+                questions = [f"{field}에 대한 추가 정보가 필요합니다. 구체적으로 알려주세요." 
+                           for field in missing_fields[:2]]
             
-            result = {
-                "communication_type": "validation",
-                "is_valid": validation_data.get("is_valid", False),
-                "confidence": validation_data.get("confidence", 0.5),
-                "reason": validation_data.get("reason", ""),
-                "suggestions": validation_data.get("suggestions", []),
-                "processing_time": processing_time
-            }
-            
-            # 통계 업데이트
-            self._update_communication_stats("validation", processing_time, True)
-            
-            return result
+            return UserCommunicatorOutput(
+                step="wait_for_answer",
+                questions=questions,
+                originalSource=source
+            )
             
         except Exception as e:
-            logger.error(f"Input validation failed: {str(e)}")
-            return self._create_error_response("validation", str(e))
+            logger.error(f"Agent request handling failed: {str(e)}")
+            return UserCommunicatorOutput(
+                step="wait_for_answer",
+                questions=["추가 정보가 필요합니다. 더 구체적으로 설명해 주세요."],
+                originalSource=source
+            )
     
-    async def _explain_result(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """결과 설명 생성"""
-        result_data = input_data.get("result_data", {})
-        context = input_data.get("context", "")
+    async def _create_finalized_input(self, user_reply: str, source: str) -> str:
+        """사용자 응답을 바탕으로 최종 입력 생성"""
+        if not user_reply:
+            return ""
+            
+        system_prompt = f"""
+        사용자의 응답을 분석하여 SQL 생성에 필요한 구조화된 정보를 JSON 형태로 추출하세요.
         
-        logger.info("CommunicationSpecialist: Generating result explanation")
+        사용자 응답: {user_reply}
+        원본 소스: {source}
         
-        explanation_prompt = f"""
-        다음 SQL 생성 결과를 사용자가 이해하기 쉽게 설명해주세요.
+        다음 형식으로 응답하세요 (JSON):
+        {{
+            "query_type": "데이터 조회 유형 (예: aggregate, filter, join 등)",
+            "time_range": {{
+                "period": "기간 (예: 3개월, 1년 등)",
+                "start_date": "시작일 (가능한 경우)",
+                "end_date": "종료일 (가능한 경우)"
+            }},
+            "sort_criteria": {{
+                "field": "정렬 기준 필드",
+                "order": "asc 또는 desc"
+            }},
+            "filters": ["필터 조건들"],
+            "aggregations": ["집계 조건들"],
+            "tables_involved": ["관련 테이블들"],
+            "description": "간단한 요약"
+        }}
         
-        결과 데이터: {json.dumps(result_data, ensure_ascii=False, indent=2)}
-        맥락: {context}
-        
-        설명에 포함할 내용:
-        1. 무엇이 생성되었는지
-        2. 주요 특징이나 최적화 내용
-        3. 사용자가 알아야 할 중요한 정보
-        4. 다음 단계 제안 (있다면)
-        
-        친근하고 이해하기 쉬운 톤으로 작성해주세요.
+        정보가 없는 필드는 null로 설정하세요.
         """
         
         try:
-            start_time = datetime.now()
-            response_content = await self.send_llm_request(explanation_prompt)
-            processing_time = (datetime.now() - start_time).total_seconds()
-            
-            result = {
-                "communication_type": "explanation",
-                "explanation": response_content.strip(),
-                "context": context,
-                "processing_time": processing_time
-            }
-            
-            return result
-            
+            response = await self.send_llm_request(system_prompt)
+            # JSON 파싱 검증
+            parsed = self._parse_json_response(response)
+            if parsed:
+                return response.strip()
+            else:
+                # JSON 파싱 실패시 기본 구조 반환
+                return self._create_fallback_finalized_input(user_reply)
         except Exception as e:
-            logger.error(f"Result explanation failed: {str(e)}")
-            return self._create_error_response("explanation", str(e))
+            logger.error(f"Finalized input creation failed: {str(e)}")
+            return self._create_fallback_finalized_input(user_reply)
     
-    async def _process_feedback(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """사용자 피드백 처리"""
-        feedback = input_data.get("feedback", "")
-        context = input_data.get("context", "")
-        
-        logger.info("CommunicationSpecialist: Processing user feedback")
-        
-        # 피드백 분석 및 개선사항 제안
-        result = {
-            "communication_type": "feedback",
-            "feedback_received": feedback,
-            "acknowledgment": "피드백을 주셔서 감사합니다.",
-            "improvements": ["피드백을 바탕으로 시스템을 개선하겠습니다."],
-            "context": context
-        }
-        
-        return result
+    def _determine_next_agent(self, source: str) -> str:
+        """다음 에이전트 결정"""
+        if source == "user":
+            return "sql_generator"
+        elif source == "sql_generator":
+            return "sql_generator"  # 다시 SQL 생성으로
+        elif source == "data_explorer":
+            return "data_explorer"  # 다시 데이터 탐색으로
+        else:
+            return "orchestrator"
     
-    def _format_uncertainties_for_prompt(self, uncertainties: List[Dict]) -> str:
-        """불확실성을 프롬프트용으로 포맷팅"""
-        if not uncertainties:
-            return "해결되지 않은 불확실성이 없습니다."
+    def _is_valid_user_input(self, user_input: str) -> bool:
+        """사용자 입력 유효성 검사"""
+        if not user_input or not user_input.strip():
+            return False
         
-        formatted = []
-        for i, uncertainty in enumerate(uncertainties, 1):
-            uncertainty_type = uncertainty.get("uncertainty_type", "unknown")
-            description = uncertainty.get("description", "N/A")
-            error = uncertainty.get("error", "")
-            
-            formatted.append(f"{i}. [{uncertainty_type}] {description}")
-            if error:
-                formatted.append(f"   오류: {error}")
+        # 너무 짧거나 무의미한 입력 체크
+        cleaned_input = user_input.strip()
+        if len(cleaned_input) < 2:
+            return False
         
-        return "\n".join(formatted)
+        # 특수 문자만 있거나 반복 문자 체크
+        meaningless_patterns = ["ㅇㅇ", "ㅎㅎ", "ㅋㅋ", ".", "..", "...", "?", "??", "???"]
+        if cleaned_input in meaningless_patterns:
+            return False
+        
+        # 모든 문자가 같은 경우 (aaa, 111 등)
+        if len(set(cleaned_input)) == 1 and len(cleaned_input) > 1:
+            return False
+        
+        return True
     
-    def _format_exploration_results(self, exploration_results: Dict) -> str:
-        """탐색 결과를 프롬프트용으로 포맷팅"""
-        if not exploration_results:
-            return "탐색 결과가 없습니다."
-        
-        insights = exploration_results.get("insights", [])
-        if insights:
-            return f"탐색을 통해 발견된 정보:\n" + "\n".join([f"- {insight}" for insight in insights])
-        
-        return "탐색이 수행되었으나 유의미한 결과를 찾지 못했습니다."
+    def _create_fallback_finalized_input(self, user_reply: str) -> str:
+        """JSON 파싱 실패시 기본 구조화된 응답 생성"""
+        return json.dumps({
+            "query_type": "general",
+            "time_range": {
+                "period": None,
+                "start_date": None,
+                "end_date": None
+            },
+            "sort_criteria": {
+                "field": None,
+                "order": None
+            },
+            "filters": [],
+            "aggregations": [],
+            "tables_involved": [],
+            "description": user_reply,
+            "raw_input": user_reply
+        }, ensure_ascii=False)
     
     def _parse_json_response(self, response_content: str) -> Optional[Dict]:
         """JSON 응답 파싱"""
         try:
-            # 코드 블록 제거
             content = response_content.strip()
             if content.startswith("```json"):
                 content = content[7:]
@@ -396,93 +366,7 @@ class UserCommunicatorAgent(BaseAgent):
         except json.JSONDecodeError as e:
             logger.warning(f"JSON parsing failed: {str(e)}")
             return None
-    
-    def _generate_fallback_questions(self, uncertainties: List[Dict]) -> Dict[str, Any]:
-        """JSON 파싱 실패시 기본 질문 생성"""
-        questions = []
-        
-        for uncertainty in uncertainties[:2]:  # 최대 2개만
-            uncertainty_type = uncertainty.get("uncertainty_type", "unknown")
-            description = uncertainty.get("description", "N/A")
-            
-            question = {
-                "question": f"{description}에 대해 더 구체적으로 알려주세요.",
-                "context": f"{uncertainty_type} 불확실성을 해결하기 위한 질문입니다.",
-                "examples": ["예시를 제공해주세요."],
-                "uncertainty_type": uncertainty_type,
-                "priority": "high"
-            }
-            questions.append(question)
-        
-        return {
-            "questions": questions,
-            "summary": "불확실성 해결을 위한 추가 정보가 필요합니다.",
-            "interaction_type": "clarification"
-        }
-    
-    def _calculate_question_quality(self, questions: List[Dict]) -> float:
-        """질문 품질 점수 계산"""
-        if not questions:
-            return 0.0
-        
-        quality_score = 0.8  # 기본 점수
-        
-        # 질문 수에 따른 조정
-        if len(questions) <= 3:
-            quality_score += 0.1  # 적절한 수의 질문
-        
-        # 예시 포함 여부
-        questions_with_examples = sum(1 for q in questions if q.get("examples"))
-        if questions_with_examples > 0:
-            quality_score += 0.1
-        
-        return min(quality_score, 1.0)
-    
-    def _update_communication_stats(self, comm_type: str, processing_time: float, success: bool):
-        """커뮤니케이션 통계 업데이트"""
-        self.communication_stats["total_interactions"] += 1
-        
-        if comm_type == "clarification":
-            self.communication_stats["clarifications_generated"] += 1
-        elif comm_type == "validation":
-            self.communication_stats["validations_performed"] += 1
-        
-        if success:
-            self.communication_stats["successful_resolutions"] += 1
-        
-        # 평균 응답 시간 업데이트
-        current_avg = self.communication_stats["avg_response_time"]
-        total_interactions = self.communication_stats["total_interactions"]
-        self.communication_stats["avg_response_time"] = (
-            (current_avg * (total_interactions - 1) + processing_time) / total_interactions
-        )
-    
-    def _create_error_response(self, comm_type: str, error_msg: str) -> Dict[str, Any]:
-        """오류 응답 생성"""
-        return {
-            "communication_type": comm_type,
-            "success": False,
-            "error": error_msg,
-            "fallback_message": "처리 중 오류가 발생했습니다. 다시 시도해주세요."
-        }
-    
-    def get_agent_statistics(self) -> Dict[str, Any]:
-        """Agent 통계 정보 반환"""
-        stats = self.communication_stats
-        
-        if stats["total_interactions"] == 0:
-            return {"message": "커뮤니케이션 이력이 없습니다."}
-        
-        success_rate = (stats["successful_resolutions"] / stats["total_interactions"]) * 100
-        
-        return {
-            "total_interactions": stats["total_interactions"],
-            "clarifications_generated": stats["clarifications_generated"],
-            "validations_performed": stats["validations_performed"],
-            "success_rate": round(success_rate, 2),
-            "avg_response_time": round(stats["avg_response_time"], 3),
-            "performance_grade": "A" if success_rate > 85 and stats["avg_response_time"] < 2.0 else "B"
-        }
+
 
 # Agent 생성 헬퍼 함수
 def create_user_communicator_agent(custom_config: Optional[Dict[str, Any]] = None) -> UserCommunicatorAgent:
@@ -497,3 +381,4 @@ def create_user_communicator_agent(custom_config: Optional[Dict[str, Any]] = Non
     )
     
     return UserCommunicatorAgent(config)
+
