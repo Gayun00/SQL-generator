@@ -1,417 +1,310 @@
+# -*- coding: utf-8 -*-
 """
-SchemaAnalyzer Agent - 스키마 분석 및 불확실성 탐지 전문 Agent
+SchemaAnalyzer Agent - 자연어 텍스트와 스키마 정보 분석 전문 Agent
 
-기존 sql_analyzer 노드를 Agent로 변환하여 스키마 패턴 인식, 불확실성 탐지,
-데이터 관계 분석에 특화된 지능형 Agent로 구현했습니다.
+사용자의 자연어 요청을 분석하여 관련 스키마 정보를 추출하고,
+불충분한 정보에 대해서는 추가 정보를 요청하는 에이전트
 """
 
-from typing import Dict, Any, List, Optional
-import json
+from typing import Dict, Any, List, Optional, Literal
 import logging
 from datetime import datetime
+import json
+from dataclasses import dataclass, asdict
 
-from .base_agent import BaseAgent, AgentMessage, MessageType, AgentConfig, create_agent_config
-from rag.schema_retriever import schema_retriever
-from langchain.schema import HumanMessage, SystemMessage
+# 직접 실행시 import 오류 방지를 위한 경로 설정
+import sys
+import os
+if __name__ == "__main__":
+    # 프로젝트 루트를 Python 경로에 추가
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, project_root)
+
+from agents.simple_base_agent import SimpleBaseAgent, AgentMessage, MessageType, AgentConfig, create_agent_config
 
 logger = logging.getLogger(__name__)
+# RAG schema retriever import
+from rag.schema_retriever import schema_retriever
 
-class SchemaAnalyzerAgent(BaseAgent):
-    """스키마 분석 및 불확실성 탐지 전문 Agent"""
+@dataclass
+class SchemaAnalyzerInput:
+    """SchemaAnalyzer 입력 데이터 구조"""
+    userInput: str  # 사용자가 자연어로 쓴 질문
+
+@dataclass
+class SchemaAnalyzerOutput:
+    """SchemaAnalyzer 출력 데이터 구조"""
+    analysis_type: Literal["schema_context", "needs_more_info"]
+    # schema_context인 경우
+    relevantTables: Optional[List[str]] = None
+    relevantFields: Optional[Dict[str, List[str]]] = None
+    joins: Optional[List[Dict[str, str]]] = None  # [{"from": str, "to": str}]
+    naturalDescription: Optional[str] = None
+    # needs_more_info인 경우
+    missingInfoDescription: Optional[str] = None
+    followUpQuestions: Optional[List[str]] = None
+
+class SchemaAnalyzerAgent(SimpleBaseAgent):
+    """자연어 텍스트와 스키마 정보 분석 전문 Agent"""
     
-    def __init__(self, config: Optional[AgentConfig] = None):
+    def __init__(self, config: Optional[AgentConfig] = None, similarity_threshold: float = 0.3):
         if config is None:
             config = create_agent_config(
                 name="schema_analyzer",
-                specialization="schema_analysis_uncertainty_detection",
+                specialization="schema_analysis_and_context_extraction",
                 model="gpt-4",
-                temperature=0.2,  # 정확성 중시
-                max_tokens=2000
+                temperature=0.3,
+                max_tokens=1500
             )
         
         super().__init__(config)
-        
-        # 스키마 분석 전용 설정
-        self.uncertainty_types = {
-            "column_values": "컬럼 값 불확실성",
-            "table_relationship": "테이블 관계 불확실성", 
-            "data_range": "데이터 범위 불확실성"
-        }
-        
-        # 성능 추적
-        self.analysis_history = []
-        
-        logger.info(f"SchemaAnalyzer Agent initialized with specialization: {self.specialization}")
+        self.similarity_threshold = similarity_threshold  # 유사도 임계값 설정
+        logger.info(f"SchemaAnalyzer Agent initialized with similarity_threshold={similarity_threshold}")
     
     def get_system_prompt(self) -> str:
         """스키마 분석 전문 시스템 프롬프트"""
-        return f"""
-        당신은 SQL 스키마 분석과 불확실성 탐지 전문 AI Agent입니다.
-        
-        **전문 분야:**
-        - 데이터베이스 스키마 패턴 인식
-        - 테이블 간 관계 분석
-        - 쿼리 불확실성 탐지
-        - RAG 기반 스키마 정보 활용
+        return """
+        당신은 자연어 쿼리와 데이터베이스 스키마 정보를 분석하는 전문 AI Agent입니다.
         
         **핵심 역할:**
-        1. 사용자 쿼리에서 불명확한 요소들을 정확히 식별
-        2. 스키마 정보를 활용한 관계 분석
-        3. 추가 탐색이 필요한 영역 제안
+        1. 사용자의 자연어 요청을 분석하여 필요한 테이블과 필드 식별
+        2. 임베딩된 스키마 정보에서 관련성 높은 요소들 추출
+        3. 테이블 간 조인 관계 파악 및 제안
+        4. 정보가 불충분한 경우 구체적인 추가 정보 요청
         
-        **불확실성 유형:**
-        1. column_values: 컬럼에 어떤 값들이 있는지 모르는 경우
-           - 예: "상태가 '활성'인 사용자" → status 컬럼의 실제 값들 확인 필요
-           - 예: "카테고리별 매출" → category 컬럼의 실제 값들 확인 필요
-        
-        2. table_relationship: 테이블 간 관계가 불분명한 경우
-           - 예: "사용자별 주문 정보" → users와 orders 테이블의 연결 방법
-           - 예: "상품과 주문의 관계" → 중간 테이블 존재 여부
-        
-        3. data_range: 데이터의 범위나 분포가 불분명한 경우
-           - 예: "최근 데이터" → 실제 데이터의 날짜 범위
-           - 예: "인기 상품" → 판매량이나 평점의 기준값
-        
-        **응답 원칙:**
-        - 정확성과 신중함을 최우선으로 함
-        - 스키마 정보를 기반으로 한 분석 제공
-        - 불확실성이 있다면 반드시 탐지하여 보고
-        - JSON 형식으로 구조화된 결과 제공
-        
-        **성능 최적화:**
-        - 분석 시간: 평균 2-5초 목표
-        - 정확도: 95% 이상 목표
-        - 신뢰도 점수 제공으로 품질 보장
+        **분석 원칙:**
+        - 자연어 쿼리의 핵심 의도 파악
+        - 스키마와 쿼리 간의 의미적 연관성 분석
+        - 모호한 부분에 대해서는 명확한 추가 질문 생성
+        - BigQuery 환경을 고려한 스키마 분석
         """
     
     async def process_message(self, message: AgentMessage) -> AgentMessage:
-        """메시지 처리 - 스키마 분석 작업 수행"""
+        """메시지 처리 - 스키마 분석"""
         try:
-            # 입력 유효성 검증
-            if not await self.validate_input(message):
-                return self.create_error_message(message, ValueError("Invalid input message"))
+            # 입력 데이터 파싱
+            content = message.content
+            input_data = SchemaAnalyzerInput(
+                userInput=content.get("userInput")
+            )
             
-            # 메시지 히스토리에 추가
-            self.add_message_to_history(message)
+            # 스키마 분석 수행
+            result = await self._analyze_schema_context(input_data)
             
-            # 작업 타입에 따른 처리
-            task_type = message.content.get("task_type", "full_analysis")
-            input_data = message.content.get("input_data", {})
-            
-            if task_type == "quick_analysis":
-                result = await self._quick_analysis(input_data)
-            elif task_type == "full_analysis":
-                result = await self._full_analysis(input_data)
-            elif task_type == "deep_analysis":
-                result = await self._deep_analysis(input_data)
-            elif task_type == "validation_review":
-                result = await self._validation_review(input_data)
-            else:
-                result = await self._full_analysis(input_data)  # 기본값
-            
-            # 성공 응답 생성
-            return self.create_response_message(message, result)
+            # 결과 반환
+            return self.create_response_message(message, asdict(result))
             
         except Exception as e:
-            logger.error(f"SchemaIntelligence Agent processing failed: {str(e)}")
+            logger.error(f"SchemaAnalyzer processing failed: {str(e)}")
             return self.create_error_message(message, e)
     
-    async def _quick_analysis(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """빠른 분석 - 단순한 쿼리용"""
-        query = input_data.get("query", "")
+    async def _analyze_schema_context(self, input_data: SchemaAnalyzerInput) -> SchemaAnalyzerOutput:
+        """스키마 컨텍스트 분석"""
+        logger.info(f"Analyzing schema context for query: {input_data.userInput[:50]}...")
         
-        # 기본적인 키워드 기반 불확실성 체크
-        uncertainty_keywords = {
-            "column_values": ["상태", "카테고리", "유형", "타입", "활성", "비활성"],
-            "table_relationship": ["별", "의", "간", "관계", "연결"],
-            "data_range": ["최근", "이번", "지난", "많은", "적은", "높은", "낮은"]
-        }
+        # 1. 입력 유효성 검사
+        if not input_data.userInput or not input_data.userInput.strip():
+            return SchemaAnalyzerOutput(
+                analysis_type="needs_more_info",
+                missingInfoDescription="사용자 입력이 비어있습니다.",
+                followUpQuestions=["어떤 데이터를 조회하고 싶으신지 구체적으로 알려주세요."]
+            )
         
-        detected_uncertainties = []
-        
-        for uncertainty_type, keywords in uncertainty_keywords.items():
-            for keyword in keywords:
-                if keyword in query:
-                    detected_uncertainties.append({
-                        "type": uncertainty_type,
-                        "description": f"'{keyword}' 키워드로 인한 {self.uncertainty_types[uncertainty_type]}",
-                        "confidence": 0.7,
-                        "table": "unknown",
-                        "column": "unknown" if uncertainty_type != "table_relationship" else None,
-                        "exploration_query": f"-- {uncertainty_type} 탐색이 필요함"
-                    })
-                    break  # 타입별로 하나만 탐지
-        
-        has_uncertainty = len(detected_uncertainties) > 0
-        
-        result = {
-            "analysis_type": "quick_analysis",
-            "has_uncertainty": has_uncertainty,
-            "uncertainties": detected_uncertainties,
-            "confidence": 0.8 if not has_uncertainty else 0.6,
-            "processing_time": 0.5,  # 빠른 분석
-            "recommendation": "빠른 분석 완료. 복잡한 쿼리의 경우 full_analysis 권장"
-        }
-        
-        return result
-    
-    async def _full_analysis(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """전체 분석 - 표준 복잡도 쿼리용"""
-        query = input_data.get("query", "")
-        state = input_data.get("state", {})
-        
-        logger.info(f"SchemaIntelligence: Full analysis started for query: '{query[:50]}...'")
-        
-        # RAG를 통한 관련 스키마 검색
+        # 2. RAG를 통해 관련 스키마 정보 검색
         try:
-            relevant_context = schema_retriever.create_context_summary(query, max_tables=5)
-            logger.info("RAG based schema search completed")
-        except Exception as e:
-            logger.warning(f"RAG search failed: {str(e)}")
-            relevant_context = "스키마 정보를 가져올 수 없습니다."
-        
-        # LLM을 통한 분석
-        user_message = f"""
-        사용자 요청: {query}
-        
-        현재 상태 정보:
-        - 이전 분석 결과: {state.get('uncertaintyAnalysis', '없음')}
-        - 탐색 결과: {state.get('explorationResults', '없음')}
-        
-        다음 스키마 정보를 참고하세요:
-        {relevant_context}
-        
-        위 정보를 바탕으로 불확실성을 분석하고 JSON 형식으로 응답해주세요.
-        
-        응답 형식:
-        {{
-            "has_uncertainty": true/false,
-            "uncertainties": [
-                {{
-                    "type": "column_values|table_relationship|data_range",
-                    "description": "불확실성 설명",
-                    "table": "관련 테이블명",
-                    "column": "관련 컬럼명 (해당시)",
-                    "exploration_query": "탐지를 위한 SQL 쿼리",
-                    "confidence": 0.0-1.0
-                }}
-            ],
-            "confidence": 0.0-1.0,
-            "reasoning": "분석 근거"
-        }}
-        """
-        
-        try:
-            start_time = datetime.now()
-            response_content = await self.send_llm_request(user_message)
-            processing_time = (datetime.now() - start_time).total_seconds()
+            # schema_retriever 초기화 확인
+            if not schema_retriever.vectorstore:
+                if not schema_retriever.initialize():
+                    return SchemaAnalyzerOutput(
+                        analysis_type="needs_more_info",
+                        missingInfoDescription="스키마 검색 시스템이 초기화되지 않았습니다.",
+                        followUpQuestions=["데이터베이스 스키마를 먼저 로드해주세요."]
+                    )
             
-            # JSON 파싱
-            analysis_result = self._parse_json_response(response_content)
+            # 관련 테이블 정보 검색 (유사도 임계값 적용)
+            relevant_tables = schema_retriever.get_relevant_tables_with_threshold(
+                input_data.userInput, 
+                top_k=10, 
+                similarity_threshold=self.similarity_threshold
+            )
             
-            # 결과 보강
-            analysis_result.update({
-                "analysis_type": "full_analysis",
-                "processing_time": processing_time,
-                "schema_context_used": relevant_context is not None,
-                "query_complexity": self._assess_query_complexity(query),
-                "rag_context": relevant_context  # RAG 결과 포함
-            })
+            if not relevant_tables:
+                # 임계값을 낮춰서 재검색 시도
+                logger.info(f"No tables found with threshold {self.similarity_threshold}, trying with lower threshold")
+                fallback_tables = schema_retriever.get_relevant_tables_with_threshold(
+                    input_data.userInput, 
+                    top_k=5, 
+                    similarity_threshold=0.1  # 매우 낮은 임계값으로 재시도
+                )
+                
+                if fallback_tables:
+                    # 낮은 유사도의 테이블들이 발견된 경우
+                    available_tables = [table.get("table_name") for table in fallback_tables[:3]]
+                    return SchemaAnalyzerOutput(
+                        analysis_type="needs_more_info",
+                        missingInfoDescription=f"입력한 질문과 충분히 관련된 스키마를 찾지 못했습니다 (유사도 임계값: {self.similarity_threshold}).",
+                        followUpQuestions=[
+                            f"혹시 다음 테이블들과 관련된 내용인가요? {', '.join(available_tables)}",
+                            "더 구체적인 키워드나 테이블명을 포함해서 다시 질문해 주시겠어요?",
+                            "어떤 종류의 데이터를 조회하고 싶으신지 자세히 설명해 주세요."
+                        ]
+                    )
+                else:
+                    # 아예 관련 테이블을 찾을 수 없는 경우
+                    return SchemaAnalyzerOutput(
+                        analysis_type="needs_more_info",
+                        missingInfoDescription="입력한 질문과 관련된 스키마 정보를 찾을 수 없습니다.",
+                        followUpQuestions=[
+                            "다른 키워드나 표현을 사용해서 다시 질문해 주시겠어요?",
+                            "구체적으로 어떤 데이터나 테이블에 대해 알고 싶으신가요?",
+                            "데이터베이스에 어떤 종류의 테이블들이 있는지 먼저 확인해보시겠어요?"
+                        ]
+                    )
             
-            # 분석 히스토리에 추가
-            self.analysis_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "query": query,
-                "has_uncertainty": analysis_result.get("has_uncertainty", False),
-                "confidence": analysis_result.get("confidence", 0.0),
-                "processing_time": processing_time
-            })
+            # 3. 관련성 분석 수행
+            analysis_result = await self._perform_relevance_analysis(
+                input_data.userInput,
+                relevant_tables
+            )
             
-            logger.info(f"Full analysis completed in {processing_time:.2f}s")
             return analysis_result
             
         except Exception as e:
-            logger.error(f"Full analysis failed: {str(e)}")
-            return self._create_fallback_result("full_analysis", str(e))
+            logger.error(f"Schema context analysis failed: {str(e)}")
+            return SchemaAnalyzerOutput(
+                analysis_type="needs_more_info",
+                missingInfoDescription="스키마 분석 중 오류가 발생했습니다.",
+                followUpQuestions=["다시 시도해 주시거나, 더 구체적인 정보를 알려주세요."]
+            )
     
-    async def _deep_analysis(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """심층 분석 - 복잡한 쿼리용"""
-        query = input_data.get("query", "")
-        state = input_data.get("state", {})
+    async def _perform_relevance_analysis(self, user_input: str, tables: List[Dict[str, Any]]) -> SchemaAnalyzerOutput:
+        """관련성 분석 수행"""
         
-        logger.info(f"SchemaIntelligence: Deep analysis started for complex query")
+        # 테이블 정보를 문자열로 정리
+        schema_info = self._format_schema_info(tables)
         
-        # 다단계 분석 수행
+        system_prompt = f"""
+        사용자의 자연어 쿼리와 데이터베이스 스키마를 분석하여 SQL 생성에 필요한 정보를 추출하세요.
         
-        # 1단계: 기본 분석
-        basic_result = await self._full_analysis(input_data)
+        사용자 쿼리: {user_input}
         
-        # 2단계: 컨텍스트 확장 분석
-        extended_context = await self._get_extended_schema_context(query)
+        사용 가능한 스키마 정보:
+        {schema_info}
         
-        # 3단계: 관계 분석 강화
-        relationship_analysis = await self._analyze_table_relationships(query, extended_context)
+        다음을 분석해주세요:
+        1. 쿼리에서 언급된 데이터 요소들 (날짜, 금액, 사용자, 제품 등)
+        2. 필요한 테이블들과 각 테이블의 관련 필드들
+        3. 테이블 간 조인이 필요한 경우 조인 관계
+        4. 추가 정보가 필요한지 여부
         
-        # 4단계: 데이터 품질 분석
-        data_quality_analysis = await self._analyze_data_quality_concerns(query)
-        
-        # 결과 통합
-        deep_result = {
-            **basic_result,
-            "analysis_type": "deep_analysis",
-            "extended_context": extended_context,
-            "relationship_analysis": relationship_analysis,
-            "data_quality_concerns": data_quality_analysis,
-            "recommendation": self._generate_deep_analysis_recommendation(basic_result, relationship_analysis)
-        }
-        
-        logger.info("Deep analysis completed")
-        return deep_result
-    
-    async def _validation_review(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """검증 리뷰 - 생성된 SQL 검토"""
-        draft_sql = input_data.get("draft_sql", "")
-        original_query = input_data.get("original_query", "")
-        
-        logger.info("SchemaIntelligence: Validation review started")
-        
-        validation_prompt = f"""
-        원본 사용자 요청: {original_query}
-        생성된 SQL: {draft_sql}
-        
-        위 SQL이 사용자 요청을 정확히 반영하는지 스키마 관점에서 검증해주세요.
-        
-        검증 항목:
-        1. 테이블 및 컬럼명 정확성
-        2. JOIN 조건 적절성
-        3. WHERE 조건 완전성
-        4. 데이터 타입 일치성
-        5. 성능 최적화 가능성
-        
-        JSON 응답 형식:
+        응답 형식 (JSON):
         {{
-            "validation_passed": true/false,
-            "issues": [
-                {{
-                    "type": "table|column|join|where|performance",
-                    "severity": "critical|warning|info",
-                    "description": "문제 설명",
-                    "suggestion": "개선 제안"
-                }}
+            "has_sufficient_info": true/false,
+            "relevant_tables": ["테이블1", "테이블2", ...],
+            "relevant_fields": {{
+                "테이블1": ["필드1", "필드2", ...],
+                "테이블2": ["필드1", "필드2", ...]
+            }},
+            "suggested_joins": [
+                {{"from": "테이블1", "to": "테이블2", "condition": "조인 조건"}}
             ],
-            "confidence": 0.0-1.0,
-            "overall_assessment": "종합 평가"
+            "natural_description": "분석 결과 요약",
+            "missing_info": {{
+                "description": "부족한 정보 설명",
+                "questions": ["구체적인 질문1", "질문2", ...]
+            }}
         }}
         """
         
         try:
-            response_content = await self.send_llm_request(validation_prompt)
-            validation_result = self._parse_json_response(response_content)
+            response_content = await self.send_llm_request(system_prompt)
+            parsed_response = self._parse_json_response(response_content)
             
-            validation_result.update({
-                "analysis_type": "validation_review",
-                "sql_reviewed": draft_sql,
-                "original_query": original_query
-            })
+            if not parsed_response:
+                # JSON 파싱 실패시 기본 응답
+                return self._create_fallback_response(user_input, tables)
             
-            return validation_result
-            
+            # 충분한 정보가 있는 경우
+            if parsed_response.get("has_sufficient_info", False):
+                return SchemaAnalyzerOutput(
+                    analysis_type="schema_context",
+                    relevantTables=parsed_response.get("relevant_tables", []),
+                    relevantFields=parsed_response.get("relevant_fields", {}),
+                    joins=parsed_response.get("suggested_joins", []),
+                    naturalDescription=parsed_response.get("natural_description", "")
+                )
+            else:
+                # 추가 정보가 필요한 경우
+                missing_info = parsed_response.get("missing_info", {})
+                return SchemaAnalyzerOutput(
+                    analysis_type="needs_more_info",
+                    missingInfoDescription=missing_info.get("description", "추가 정보가 필요합니다."),
+                    followUpQuestions=missing_info.get("questions", ["더 구체적인 정보를 알려주세요."])
+                )
+                
         except Exception as e:
-            logger.error(f"Validation review failed: {str(e)}")
-            return self._create_fallback_validation_result(str(e))
+            logger.error(f"Relevance analysis failed: {str(e)}")
+            return self._create_fallback_response(user_input, tables)
     
-    async def _get_extended_schema_context(self, query: str) -> Dict[str, Any]:
-        """확장된 스키마 컨텍스트 수집"""
-        try:
-            # 더 많은 테이블 정보 수집
-            extended_context = schema_retriever.create_context_summary(query, max_tables=10)
+    def _format_schema_info(self, tables: List[Dict[str, Any]]) -> str:
+        """테이블 정보를 분석용 문자열로 포맷"""
+        formatted_info = []
+        
+        for i, table in enumerate(tables[:10], 1):  # 최대 10개 테이블만 처리
+            table_name = table.get("table_name", f"table_{i}")
+            description = table.get("description", "")
+            columns = table.get("columns", [])
             
-            return {
-                "success": True,
-                "context": extended_context,
-                "table_count": 10
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "context": "확장 컨텍스트를 가져올 수 없습니다."
-            }
+            schema_text = f"{i}. 테이블: {table_name}"
+            if description:
+                schema_text += f"\n   설명: {description}"
+            
+            if columns:
+                schema_text += f"\n   필드: "
+                field_names = []
+                for col in columns[:10]:  # 최대 10개 필드
+                    col_name = col.get("name", "")
+                    col_type = col.get("type", "")
+                    col_desc = col.get("description", "")
+                    
+                    field_text = col_name
+                    if col_type:
+                        field_text += f"({col_type})"
+                    if col_desc:
+                        field_text += f" - {col_desc}"
+                    field_names.append(field_text)
+                
+                schema_text += ", ".join(field_names)
+                
+                if len(columns) > 10:
+                    schema_text += f" ... (+{len(columns)-10}개 더)"
+            
+            formatted_info.append(schema_text)
+        
+        return "\n\n".join(formatted_info)
     
-    async def _analyze_table_relationships(self, query: str, context: Dict) -> Dict[str, Any]:
-        """테이블 관계 분석"""
-        relationship_keywords = ["join", "연결", "관계", "별", "의", "간"]
+    def _create_fallback_response(self, user_input: str, tables: List[Dict[str, Any]]) -> SchemaAnalyzerOutput:
+        """분석 실패시 기본 응답 생성"""
+        # 테이블에서 테이블명만 추출
+        available_tables = []
+        for table in tables[:5]:  # 최대 5개만
+            table_name = table.get("table_name")
+            if table_name and table_name not in available_tables:
+                available_tables.append(table_name)
         
-        has_relationship_need = any(keyword in query.lower() for keyword in relationship_keywords)
-        
-        return {
-            "relationship_complexity": "high" if has_relationship_need else "low",
-            "join_required": has_relationship_need,
-            "estimated_tables": self._estimate_table_count(query),
-            "relationship_confidence": 0.8 if has_relationship_need else 0.6
-        }
+        return SchemaAnalyzerOutput(
+            analysis_type="needs_more_info",
+            missingInfoDescription="스키마 분석 중 오류가 발생했습니다.",
+            followUpQuestions=[
+                f"다음 테이블 중 어떤 것과 관련된 데이터를 원하시나요? {', '.join(available_tables)}",
+                "조회하고 싶은 구체적인 기간이나 조건이 있나요?"
+            ]
+        )
     
-    async def _analyze_data_quality_concerns(self, query: str) -> Dict[str, Any]:
-        """데이터 품질 우려사항 분석"""
-        quality_keywords = ["null", "빈", "없는", "0", "중복"]
-        
-        has_quality_concerns = any(keyword in query.lower() for keyword in quality_keywords)
-        
-        return {
-            "quality_check_needed": has_quality_concerns,
-            "null_handling_required": "null" in query.lower() or "빈" in query,
-            "duplicate_check_needed": "중복" in query,
-            "data_validation_score": 0.7 if has_quality_concerns else 0.9
-        }
-    
-    def _generate_deep_analysis_recommendation(self, basic_result: Dict, relationship_analysis: Dict) -> str:
-        """심층 분석 기반 추천사항 생성"""
-        recommendations = []
-        
-        if basic_result.get("has_uncertainty", False):
-            recommendations.append("추가 탐색을 통한 불확실성 해결 필요")
-        
-        if relationship_analysis.get("join_required", False):
-            recommendations.append("복잡한 JOIN 로직으로 인한 성능 최적화 고려")
-        
-        if relationship_analysis.get("relationship_complexity") == "high":
-            recommendations.append("테이블 관계 검증을 위한 데이터 탐색 권장")
-        
-        return "; ".join(recommendations) if recommendations else "추가 조치 불필요"
-    
-    def _assess_query_complexity(self, query: str) -> str:
-        """쿼리 복잡도 평가"""
-        complexity_indicators = {
-            "high": ["join", "union", "subquery", "group by", "having", "window"],
-            "medium": ["where", "order by", "distinct", "aggregate"],
-            "low": ["select", "from", "limit"]
-        }
-        
-        query_lower = query.lower()
-        
-        for level, keywords in complexity_indicators.items():
-            if any(keyword in query_lower for keyword in keywords):
-                return level
-        
-        return "low"
-    
-    def _estimate_table_count(self, query: str) -> int:
-        """쿼리에서 예상되는 테이블 수 추정"""
-        table_indicators = ["테이블", "에서", "의", "별", "간", "관계", "join", "from"]
-        
-        count = 0
-        for indicator in table_indicators:
-            if indicator in query.lower():
-                count += 1
-        
-        return min(max(count, 1), 5)  # 1~5 범위로 제한
-    
-    def _parse_json_response(self, response_content: str) -> Dict[str, Any]:
+    def _parse_json_response(self, response_content: str) -> Optional[Dict]:
         """JSON 응답 파싱"""
         try:
-            # 코드 블록 제거
             content = response_content.strip()
-            
             if content.startswith("```json"):
                 content = content[7:]
             if content.startswith("```"):
@@ -419,82 +312,22 @@ class SchemaAnalyzerAgent(BaseAgent):
             if content.endswith("```"):
                 content = content[:-3]
             
-            content = content.strip()
-            
-            return json.loads(content)
-            
+            return json.loads(content.strip())
         except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed: {str(e)}")
-            logger.error(f"Original response: {response_content}")
-            
-            # 파싱 실패시 기본 구조 반환
-            return {
-                "has_uncertainty": False,
-                "uncertainties": [],
-                "confidence": 0.0,
-                "error": f"JSON 파싱 실패: {str(e)}",
-                "raw_response": response_content
-            }
-    
-    def _create_fallback_result(self, analysis_type: str, error_msg: str) -> Dict[str, Any]:
-        """분석 실패시 대체 결과 생성"""
-        return {
-            "analysis_type": analysis_type,
-            "has_uncertainty": True,  # 안전하게 불확실성 있다고 가정
-            "uncertainties": [{
-                "type": "general",
-                "description": f"분석 중 오류 발생: {error_msg}",
-                "confidence": 0.0
-            }],
-            "confidence": 0.0,
-            "error": error_msg,
-            "fallback": True
-        }
-    
-    def _create_fallback_validation_result(self, error_msg: str) -> Dict[str, Any]:
-        """검증 실패시 대체 결과 생성"""
-        return {
-            "analysis_type": "validation_review",
-            "validation_passed": False,
-            "issues": [{
-                "type": "system",
-                "severity": "critical",
-                "description": f"검증 중 오류 발생: {error_msg}",
-                "suggestion": "수동 검토 필요"
-            }],
-            "confidence": 0.0,
-            "error": error_msg,
-            "fallback": True
-        }
-    
-    def get_agent_statistics(self) -> Dict[str, Any]:
-        """Agent 통계 정보 반환"""
-        if not self.analysis_history:
-            return {"message": "분석 이력이 없습니다."}
-        
-        total_analyses = len(self.analysis_history)
-        uncertainty_detected = sum(1 for h in self.analysis_history if h["has_uncertainty"])
-        avg_confidence = sum(h["confidence"] for h in self.analysis_history) / total_analyses
-        avg_processing_time = sum(h["processing_time"] for h in self.analysis_history) / total_analyses
-        
-        return {
-            "total_analyses": total_analyses,
-            "uncertainty_detection_rate": round((uncertainty_detected / total_analyses) * 100, 2),
-            "average_confidence": round(avg_confidence, 3),
-            "average_processing_time": round(avg_processing_time, 3),
-            "performance_grade": "A" if avg_confidence > 0.8 and avg_processing_time < 3.0 else "B"
-        }
+            logger.warning(f"JSON parsing failed: {str(e)}")
+            return None
+
 
 # Agent 생성 헬퍼 함수
-def create_schema_analyzer_agent(custom_config: Optional[Dict[str, Any]] = None) -> SchemaAnalyzerAgent:
+def create_schema_analyzer_agent(custom_config: Optional[Dict[str, Any]] = None, similarity_threshold: float = 0.3) -> SchemaAnalyzerAgent:
     """SchemaAnalyzer Agent 생성"""
     config = create_agent_config(
         name="schema_analyzer",
-        specialization="schema_analysis_uncertainty_detection",
+        specialization="schema_analysis_and_context_extraction",
         model="gpt-4",
-        temperature=0.2,
-        max_tokens=2000,
+        temperature=0.3,
+        max_tokens=1500,
         **(custom_config or {})
     )
     
-    return SchemaAnalyzerAgent(config)
+    return SchemaAnalyzerAgent(config, similarity_threshold=similarity_threshold)
