@@ -2,7 +2,8 @@ from typing import TypedDict, List, Dict, Any, Optional
 import uuid
 from langgraph.graph import StateGraph, END
 from newAgents.user_communicator_agent import UserCommunicator
-from newAgents.sub_agents import schema_analyzer, sql_generator, sql_executor, data_explorer
+from newAgents.schema_analyzer_agent import SchemaAnalyzer
+from newAgents.sub_agents import sql_generator, sql_executor, data_explorer
 
 # 1. State Definition - retry_counts 추가
 class OrchestratorState(TypedDict):
@@ -27,6 +28,7 @@ class OrchestratorState(TypedDict):
 class Orchestrator:
     def __init__(self):
         self.user_communicator = UserCommunicator()
+        self.schema_analyzer = SchemaAnalyzer()
         self.workflow = StateGraph(OrchestratorState)
         self._setup_workflow()
 
@@ -77,7 +79,10 @@ class Orchestrator:
 
     def run_schema_analyzer(self, state: OrchestratorState) -> OrchestratorState:
         state["workflow_history"].append("Running Schema Analyzer")
-        result = schema_analyzer({"query": state["user_input"]})
+        result = self.schema_analyzer.process({
+            "session_id": state["session_id"],
+            "content": {"query": state["user_input"]}
+        })
         state["schema_analyzer_result"] = result
         return state
 
@@ -114,9 +119,9 @@ class Orchestrator:
         status = state["schema_analyzer_result"]["status"]
         if status == "success":
             return "sql_generator"
-        if status == "insufficient_info":
+        if status == "needs_user_clarification":
             state["requesting_agent"] = "schema_analyzer"
-            state["agent_request_content"] = state["schema_analyzer_result"].get("info_request")
+            state["agent_request_content"] = {"question": state["schema_analyzer_result"].get("question")}
             return "user_communicator"
         return "error_handler"
 
@@ -140,8 +145,8 @@ class Orchestrator:
         state["agent_request_content"] = state["sql_executor_result"].get("retry_suggestion")
         return "sql_generator"
 
-    # --- Test Runner (재시도 로직 추가) ---
-    def run_test_scenario(self, initial_query: str, user_responses: List[str] = [], max_retries: int = 3):
+    # --- Test Runner (루프 횟수 제한 추가) ---
+    def run_test_scenario(self, initial_query: str, user_responses: List[str] = [], max_loop_iterations: int = 3):
         state = {
             "session_id": str(uuid.uuid4()),
             "user_input": initial_query,
@@ -149,20 +154,23 @@ class Orchestrator:
             "retry_counts": {}
         }
         response_index = 0
+        loop_count = 0 # 루프 카운터 추가
         
-        while not state.get("is_complete"):
-            current_node = state.get("next_agent_to_call", "user_communicator")
-            
-            # 재시도 횟수 확인 및 증가
-            state["retry_counts"][current_node] = state["retry_counts"].get(current_node, 0) + 1
-            if state["retry_counts"][current_node] > max_retries:
-                print(f"\n--- Max retries ({max_retries}) reached for {current_node}. Terminating workflow. ---")
-                state["is_complete"] = True
-                state["error_message"] = f"Max retries reached for {current_node}."
-                break
+        print(f"\n--- Starting Scenario with initial query: {initial_query} ---")
 
-            # Invoke the graph.
-            state = self.app.invoke(state, {"recursion_limit": 25})
+        while not state.get("is_complete") and loop_count < max_loop_iterations: # 루프 횟수 제한 조건 추가
+            loop_count += 1
+            print(f"\n--- Loop Iteration: {loop_count} ---") # 디버깅을 위한 출력
+
+            # Run the graph until it stops (END or pending_question)
+            new_state = self.app.invoke(state, {"recursion_limit": 25})
+            
+            # 새로운 state에서 final_result가 설정되었는지 확인
+            if new_state.get("sql_executor_result", {}).get("status") == "success" and not state.get("final_result"):
+                new_state["final_result"] = new_state["sql_executor_result"]
+                new_state["is_complete"] = True
+            
+            state = new_state
 
             # If the graph stopped to ask a question, handle it.
             if state.get("pending_question"):
@@ -183,6 +191,11 @@ class Orchestrator:
             # Check for completion or explicit END
             if state.get("is_complete") or state.get("next_agent_to_call") == END:
                 break
+
+        if loop_count >= max_loop_iterations and not state.get("is_complete"):
+            print(f"\n--- Max loop iterations ({max_loop_iterations}) reached. Terminating workflow. ---")
+            state["is_complete"] = True
+            state["error_message"] = "Max loop iterations reached."
 
         print("\n--- Workflow Finished ---")
         print("Final Result:", state.get("final_result"))
