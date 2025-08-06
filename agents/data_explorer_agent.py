@@ -61,56 +61,27 @@ class DataExplorerAgent(BaseAgent):
         
     
     def get_system_prompt(self) -> str:
-        """BigQuery 특화 데이터 탐색 전문 시스템 프롬프트"""
+        """DataExplorer 시스템 프롬프트"""
         return f"""
-        당신은 BigQuery 데이터 탐색 및 불확실성 해결 전문 AI Agent입니다.
+        당신은 BigQuery 데이터 탐색 전문가입니다.
         
-        **전문 분야:**
-        - BigQuery 데이터베이스 구조 탐색 및 이해
-        - 불확실성 해결을 위한 BigQuery 탐색 쿼리 설계
-        - BigQuery INFORMATION_SCHEMA 활용한 메타데이터 분석
-        - 데이터 패턴 및 관계 발견
-        - 통계적 분석을 통한 인사이트 도출
+        🚨 **핵심 규칙: BigQuery Standard SQL만 사용하세요!**
         
-        **핵심 역할:**
-        1. 사용자 요청의 불확실성 분석
-        2. BigQuery 탐색 쿼리 자동 생성 및 실행
-        3. 데이터 인사이트 발견 및 요약
-        4. 불확실성 해결 방안 제시
+        **BigQuery 문법 규칙:**
+        - 테이블명: `project.dataset.table` (백틱 필수)
+        - LIMIT: LIMIT 20 (MySQL의 LIMIT offset, count 금지)
+        - 스키마 조회: INFORMATION_SCHEMA 사용
+        - 절대 금지: DESCRIBE, SHOW TABLES, SHOW COLUMNS 등 MySQL 문법
         
-        **BigQuery 탐색 원칙:**
-        - **ONLY BigQuery Standard SQL 문법 사용** (MySQL/PostgreSQL 문법 절대 금지)
-        - 안전하고 효율적인 탐색 쿼리 생성
-        - 테이블명은 백틱과 완전한 형식 사용: `us-all-data.us_plus.table_name`
-        - LIMIT 사용으로 성능 최적화 (기본 20개)
-        - 점진적 탐색: 간단한 것부터 복잡한 것으로
-        - 실용적 인사이트 도출 및 제공
-        - 탐색 결과의 명확한 해석 및 설명
+        **탐색 전략:**
+        - 빠른 스캔: LIMIT 10-20 사용
+        - 안전한 쿼리: 에러 방지를 위한 SAFE_CAST 등 사용
+        - 효율적인 탐색: 불필요한 데이터 로드 방지
         
-        **BigQuery 탐색 전략:**
-        - quick_scan: 빠른 데이터 구조 파악 (LIMIT 10)
-        - statistical: 집계 및 통계 분석 (COUNT, AVG, SUM, etc)
-        - relationship: JOIN을 통한 테이블 관계 탐색
-        - value_discovery: DISTINCT, GROUP BY로 값 패턴 분석
-        - temporal: 날짜/시간 기반 트렌드 분석 (EXTRACT, DATE_SUB 활용)
-        - schema_exploration: INFORMATION_SCHEMA로 메타데이터 탐색
-        
-        **BigQuery 특화 탐색 패턴:**
-        - 테이블 목록: `SELECT table_name FROM \`us-all-data.us_plus.INFORMATION_SCHEMA.TABLES\``
-        - 컬럼 정보: `SELECT column_name, data_type FROM \`us-all-data.us_plus.INFORMATION_SCHEMA.COLUMNS\` WHERE table_name = 'table_name'`
-        - 데이터 샘플: `SELECT * FROM \`us-all-data.us_plus.table_name\` LIMIT 10`
-        - 값 분포: `SELECT column_name, COUNT(*) as count FROM \`us-all-data.us_plus.table_name\` GROUP BY column_name ORDER BY count DESC`
-        
-        **금지된 문법:**
-        - SHOW TABLES, SHOW COLUMNS, DESCRIBE 등 MySQL 문법 절대 사용 금지
-        - 백틱 없는 테이블명 사용 금지
-        - LIMIT offset, count 형식 (→ LIMIT count OFFSET offset 사용)
-        
-        **품질 보장:**
-        - BigQuery 문법 준수율: 100% 목표
-        - 탐색 시간: 평균 2-5초 목표
-        - 불확실성 해결률: 80% 이상 목표
-        - 인사이트 품질: 실용성과 정확성 중시
+        **품질 목표:**
+        - BigQuery 문법 준수율: 100%
+        - 탐색 시간: 2-5초
+        - 불확실성 해결률: 80% 이상
         """
     
     async def process_message(self, message: AgentMessage) -> AgentMessage:
@@ -278,42 +249,75 @@ class DataExplorerAgent(BaseAgent):
         
         # 자동 탐색 쿼리 생성
         prompt = f"""
-        불확실성 정보:
-        - 타입: {uncertainty_type}
-        - 설명: {description}
-        - 원본 쿼리: {original_query}
-        
-        {dataset_info}
-        
-        이 불확실성을 해결하기 위한 탐색용 BigQuery Standard SQL을 생성해주세요.
-        
-        **BigQuery 탐색 쿼리 생성 원칙:**
-        1. **ONLY BigQuery Standard SQL 문법 사용** (MySQL/PostgreSQL 문법 절대 금지)
-        2. 안전하고 효율적인 쿼리 (LIMIT 20 사용)
-        3. 테이블명은 백틱과 완전한 형식 사용: `project.dataset.table`
-        4. 불확실성 타입에 따른 적절한 탐색 전략:
-           - column_values: DISTINCT, GROUP BY로 가능한 값들 탐색
-           - table_relationship: JOIN 가능성 탐색  
-           - data_range: MIN, MAX, COUNT로 데이터 범위 확인
-           - schema_ambiguity: INFORMATION_SCHEMA로 테이블/컬럼 구조 탐색
-        
-        **BigQuery 탐색 쿼리 예시:**
-        - 테이블 목록: SELECT table_name FROM `{bq_client.full_dataset_path}.INFORMATION_SCHEMA.TABLES` WHERE table_name LIKE '%pattern%'
-        - 컬럼 정보: SELECT column_name, data_type FROM `{bq_client.full_dataset_path}.INFORMATION_SCHEMA.COLUMNS` WHERE table_name = 'table_name'
-        - 값 분포: SELECT column_name, COUNT(*) as count FROM `{bq_client.full_dataset_path}.table_name` GROUP BY column_name ORDER BY count DESC LIMIT 20
-        - 데이터 샘플: SELECT * FROM `{bq_client.full_dataset_path}.table_name` LIMIT 10
-        
-        **절대 금지된 문법:**
-        - SHOW TABLES, SHOW COLUMNS, DESCRIBE 등 MySQL 문법 절대 사용 금지
-        - 백틱 없는 테이블명 사용 금지
-        - LIMIT offset, count 형식 (→ LIMIT count OFFSET offset 사용)
-        
-        **품질 보장:**
-        - BigQuery 문법 준수율: 100% 목표
-        - 탐색 시간: 평균 2-5초 목표
-        - 불확실성 해결률: 80% 이상 목표
-        - 인사이트 품질: 실용성과 정확성 중시
-        """
+    🚨 **중요: BigQuery Standard SQL만 사용하세요! MySQL/PostgreSQL 문법 절대 금지!**
+    
+    불확실성 정보:
+    - 타입: {uncertainty_type}
+    - 설명: {description}
+    - 원본 쿼리: {original_query}
+    
+    {dataset_info}
+    
+    **BigQuery 탐색 쿼리 생성 규칙 (100% 준수 필수):**
+    
+    ✅ **허용되는 BigQuery 문법:**
+    - SELECT, FROM, WHERE, GROUP BY, ORDER BY, LIMIT
+    - INFORMATION_SCHEMA.TABLES, INFORMATION_SCHEMA.COLUMNS
+    - 백틱으로 감싼 테이블명: `project.dataset.table`
+    - LIMIT 20 (MySQL의 LIMIT offset, count 형식 금지)
+    
+    ❌ **절대 금지된 MySQL 문법:**
+    - DESCRIBE table_name (→ SELECT * FROM INFORMATION_SCHEMA.COLUMNS 사용)
+    - SHOW TABLES (→ SELECT table_name FROM INFORMATION_SCHEMA.TABLES 사용)
+    - SHOW COLUMNS (→ SELECT column_name FROM INFORMATION_SCHEMA.COLUMNS 사용)
+    - 백틱 없는 테이블명
+    - LIMIT offset, count 형식
+    
+    **불확실성 타입별 BigQuery 탐색 쿼리:**
+    
+    1. **column_values** (컬럼 값 탐색):
+    ```sql
+    SELECT column_name, COUNT(*) as count 
+    FROM `{bq_client.full_dataset_path}.table_name` 
+    GROUP BY column_name 
+    ORDER BY count DESC 
+    LIMIT 20
+    ```
+    
+    2. **table_relationship** (테이블 관계 탐색):
+    ```sql
+    SELECT table_name, column_name 
+    FROM `{bq_client.full_dataset_path}.INFORMATION_SCHEMA.COLUMNS` 
+    WHERE table_name IN ('table1', 'table2') 
+    ORDER BY table_name, column_name
+    ```
+    
+    3. **data_range** (데이터 범위 확인):
+    ```sql
+    SELECT 
+        MIN(column_name) as min_value,
+        MAX(column_name) as max_value,
+        COUNT(*) as total_count
+    FROM `{bq_client.full_dataset_path}.table_name`
+    ```
+    
+    4. **schema_ambiguity** (스키마 모호성 해결):
+    ```sql
+    SELECT table_name, column_name, data_type 
+    FROM `{bq_client.full_dataset_path}.INFORMATION_SCHEMA.COLUMNS` 
+    WHERE table_name = 'specific_table_name'
+    ORDER BY ordinal_position
+    ```
+    
+    **최종 검증 체크리스트:**
+    - [ ] MySQL 문법 사용 안함 (DESCRIBE, SHOW 등)
+    - [ ] 백틱으로 테이블명 감쌈
+    - [ ] BigQuery Standard SQL만 사용
+    - [ ] LIMIT 20 이하 사용
+    - [ ] INFORMATION_SCHEMA 사용 (필요시)
+    
+    위 규칙을 100% 준수하여 BigQuery 탐색 쿼리를 생성해주세요.
+    """
         
         try:
             response_content = await self.send_llm_request(prompt)

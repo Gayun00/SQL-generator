@@ -166,7 +166,7 @@ class SQLGeneratorAgent(BaseAgent):
 
     
     async def _optimized_generation(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """최적화된 SQL 생성 - 표준 처리"""
+        """최적화된 SQL 생성 및 실행"""
         query = input_data.get("query", "")
         analysis_result = input_data.get("analysis_result", {})
         exploration_result = input_data.get("exploration_result", {})
@@ -251,17 +251,69 @@ class SQLGeneratorAgent(BaseAgent):
             
             self._update_generation_stats(processing_time)
             
-            result = {
-                "generation_type": "optimized_generation",
-                "sql_query": sql_query,
-                "processing_time": processing_time,
-                "complexity": complexity,
-                "optimization_applied": len(optimizations) > 0,
-                "applied_optimizations": optimizations,
-                "schema_context_used": relevant_context is not None,
-                "exploration_used": bool(exploration_result),
-                "confidence": self._calculate_confidence(sql_query, analysis_result)
-            }
+            # SQL 실행 추가
+            print(f"🔄 SQL 실행 중...")
+            print(f"📝 SQL: {sql_query}")
+            
+            try:
+                query_result = bq_client.execute_query(sql_query)
+                execution_time = (datetime.now() - start_time).total_seconds()
+                
+                if query_result["success"]:
+                    print(f"✅ SQL 실행 성공! ({execution_time:.2f}초)")
+                    print(f"📊 결과: {query_result['returned_rows']}개 행 반환")
+                    
+                    # 실행 결과 상세 출력
+                    self._print_query_results(query_result)
+                    
+                    result = {
+                        "generation_type": "optimized_generation",
+                        "sql_query": sql_query,
+                        "processing_time": processing_time,
+                        "execution_time": execution_time,
+                        "complexity": complexity,
+                        "optimization_applied": len(optimizations) > 0,
+                        "applied_optimizations": optimizations,
+                        "schema_context_used": relevant_context is not None,
+                        "exploration_used": bool(exploration_result),
+                        "confidence": self._calculate_confidence(sql_query, analysis_result),
+                        "query_result": query_result,  # ← 실행 결과 추가
+                        "success": True
+                    }
+                else:
+                    print(f"❌ SQL 실행 실패: {query_result.get('error', 'Unknown error')}")
+                    
+                    result = {
+                        "generation_type": "optimized_generation",
+                        "sql_query": sql_query,
+                        "processing_time": processing_time,
+                        "complexity": complexity,
+                        "optimization_applied": len(optimizations) > 0,
+                        "applied_optimizations": optimizations,
+                        "schema_context_used": relevant_context is not None,
+                        "exploration_used": bool(exploration_result),
+                        "confidence": self._calculate_confidence(sql_query, analysis_result),
+                        "query_result": query_result,  # ← 실행 결과 추가
+                        "success": False,
+                        "error": query_result.get('error', 'Unknown error')
+                    }
+                
+            except Exception as e:
+                print(f"❌ SQL 실행 중 오류: {str(e)}")
+                
+                result = {
+                    "generation_type": "optimized_generation",
+                    "sql_query": sql_query,
+                    "processing_time": processing_time,
+                    "complexity": complexity,
+                    "optimization_applied": len(optimizations) > 0,
+                    "applied_optimizations": optimizations,
+                    "schema_context_used": relevant_context is not None,
+                    "exploration_used": bool(exploration_result),
+                    "confidence": self._calculate_confidence(sql_query, analysis_result),
+                    "success": False,
+                    "error": str(e)
+                }
             
             # 생성 히스토리에 추가
             self._add_to_generation_history(query, result)
