@@ -1,11 +1,14 @@
 from typing import TypedDict, List, Dict, Any, Optional
 import uuid
 from langgraph.graph import StateGraph, END
+import asyncio # asyncio 임포트
+
 from newAgents.user_communicator_agent import UserCommunicator
 from newAgents.schema_analyzer_agent import SchemaAnalyzer
-from newAgents.sub_agents import sql_generator, sql_executor, data_explorer
+from newAgents.sql_generator_agent import SQLGenerator # SQLGenerator 임포트
+from newAgents.sub_agents import sql_executor, data_explorer
 
-# 1. State Definition - retry_counts 추가
+# 1. State Definition
 class OrchestratorState(TypedDict):
     session_id: str
     is_complete: bool
@@ -22,13 +25,14 @@ class OrchestratorState(TypedDict):
     workflow_history: List[str]
     final_result: Optional[Dict[str, Any]]
     pending_question: Optional[str]
-    retry_counts: Dict[str, int] # 재시도 횟수 추가
+    retry_counts: Dict[str, int]
 
 # 2. Orchestrator Class
 class Orchestrator:
     def __init__(self):
         self.user_communicator = UserCommunicator()
         self.schema_analyzer = SchemaAnalyzer()
+        self.sql_generator = SQLGenerator() # SQLGenerator 인스턴스 생성
         self.workflow = StateGraph(OrchestratorState)
         self._setup_workflow()
 
@@ -52,8 +56,8 @@ class Orchestrator:
 
         self.app = self.workflow.compile()
 
-    # --- Agent Node Functions ---
-    def run_user_communicator(self, state: OrchestratorState) -> OrchestratorState:
+    # --- Agent Node Functions (async로 변경) ---
+    async def run_user_communicator(self, state: OrchestratorState) -> OrchestratorState:
         state["workflow_history"].append("Contacting User Communicator")
         
         message = {"session_id": state["session_id"]}
@@ -65,7 +69,7 @@ class Orchestrator:
         else:
             message["content"] = {"query": state.get("user_input")}
 
-        result = self.user_communicator.process(message)
+        result = await self.user_communicator.process(message)
 
         state["next_agent_to_call"] = result.get("next_agent")
         if result.get("processed_result"):
@@ -77,34 +81,45 @@ class Orchestrator:
         state["agent_request_content"] = None
         return state
 
-    def run_schema_analyzer(self, state: OrchestratorState) -> OrchestratorState:
+    async def run_schema_analyzer(self, state: OrchestratorState) -> OrchestratorState:
         state["workflow_history"].append("Running Schema Analyzer")
-        result = self.schema_analyzer.process({
-            "session_id": state["session_id"],
-            "content": {"query": state["user_input"]}
-        })
-        state["schema_analyzer_result"] = result
+        agent_message_input = {
+            "content": {"userInput": state["user_input"]},
+            "message_type": "request",
+            "sender": "orchestrator",
+            "receiver": "schema_analyzer",
+            "session_id": state["session_id"]
+        }
+        result_agent_message = await self.schema_analyzer.process_message(agent_message_input)
+        
+        state["schema_analyzer_result"] = result_agent_message.content
         return state
 
-    def run_sql_generator(self, state: OrchestratorState) -> OrchestratorState:
+    async def run_sql_generator(self, state: OrchestratorState) -> OrchestratorState:
         state["workflow_history"].append("Running SQL Generator")
-        result = sql_generator(state)
+        result = await self.sql_generator.process({
+            "session_id": state["session_id"],
+            "content": {
+                "user_query": state["user_input"],
+                "schema_info": state["schema_analyzer_result"].get("relevantTables", [])
+            }
+        })
         state["sql_generator_result"] = result
         return state
 
-    def run_sql_executor(self, state: OrchestratorState) -> OrchestratorState:
+    async def run_sql_executor(self, state: OrchestratorState) -> OrchestratorState:
         state["workflow_history"].append("Running SQL Executor")
-        result = sql_executor(state)
+        result = await sql_executor(state) # await 추가
         state["sql_executor_result"] = result
         return state
 
-    def run_data_explorer(self, state: OrchestratorState) -> OrchestratorState:
+    async def run_data_explorer(self, state: OrchestratorState) -> OrchestratorState:
         state["workflow_history"].append("Running Data Explorer")
-        result = data_explorer(state)
+        result = await data_explorer(state) # await 추가
         state["data_explorer_result"] = result
         return state
 
-    def error_handler(self, state: OrchestratorState) -> OrchestratorState:
+    async def error_handler(self, state: OrchestratorState) -> OrchestratorState:
         state["workflow_history"].append("Workflow Error")
         state["is_complete"] = True
         return state
@@ -116,12 +131,12 @@ class Orchestrator:
         return state.get("next_agent_to_call", "error_handler")
 
     def route_from_schema_analyzer(self, state: OrchestratorState) -> str:
-        status = state["schema_analyzer_result"]["status"]
-        if status == "success":
+        analysis_type = state["schema_analyzer_result"]["analysis_type"]
+        if analysis_type == "schema_context":
             return "sql_generator"
-        if status == "needs_user_clarification":
+        if analysis_type == "needs_more_info":
             state["requesting_agent"] = "schema_analyzer"
-            state["agent_request_content"] = {"question": state["schema_analyzer_result"].get("question")}
+            state["agent_request_content"] = {"question": state["schema_analyzer_result"].get("followUpQuestions", [])[0]}
             return "user_communicator"
         return "error_handler"
 
@@ -145,8 +160,8 @@ class Orchestrator:
         state["agent_request_content"] = state["sql_executor_result"].get("retry_suggestion")
         return "sql_generator"
 
-    # --- Test Runner (루프 횟수 제한 추가) ---
-    def run_test_scenario(self, initial_query: str, user_responses: List[str] = [], max_loop_iterations: int = 3):
+    # --- Test Runner (async로 변경) ---
+    async def run_test_scenario(self, initial_query: str, user_responses: List[str] = [], max_loop_iterations: int = 3):
         state = {
             "session_id": str(uuid.uuid4()),
             "user_input": initial_query,
@@ -154,25 +169,19 @@ class Orchestrator:
             "retry_counts": {}
         }
         response_index = 0
-        loop_count = 0 # 루프 카운터 추가
+        loop_count = 0
         
         print(f"\n--- Starting Scenario with initial query: {initial_query} ---")
 
-        while not state.get("is_complete") and loop_count < max_loop_iterations: # 루프 횟수 제한 조건 추가
+        while not state.get("is_complete") and loop_count < max_loop_iterations:
             loop_count += 1
-            print(f"\n--- Loop Iteration: {loop_count} ---") # 디버깅을 위한 출력
+            print(f"\n--- Loop Iteration: {loop_count} ---")
 
-            # Run the graph until it stops (END or pending_question)
-            new_state = self.app.invoke(state, {"recursion_limit": 25})
-            
-            # 새로운 state에서 final_result가 설정되었는지 확인
-            if new_state.get("sql_executor_result", {}).get("status") == "success" and not state.get("final_result"):
-                new_state["final_result"] = new_state["sql_executor_result"]
-                new_state["is_complete"] = True
-            
-            state = new_state
+            state = await self.app.invoke(state, {"recursion_limit": 25})
 
-            # If the graph stopped to ask a question, handle it.
+            if state.get("is_complete"):
+                break
+
             if state.get("pending_question"):
                 if response_index < len(user_responses):
                     print(f"\n[질문] {state['pending_question']}")
@@ -188,8 +197,7 @@ class Orchestrator:
                     state["error_message"] = "Not enough user responses provided."
                     break
             
-            # Check for completion or explicit END
-            if state.get("is_complete") or state.get("next_agent_to_call") == END:
+            if not state.get("next_agent_to_call") or state.get("next_agent_to_call") == END:
                 break
 
         if loop_count >= max_loop_iterations and not state.get("is_complete"):
@@ -203,8 +211,12 @@ class Orchestrator:
 
 if __name__ == '__main__':
     orchestrator = Orchestrator()
-    print("--- Running Scenario 1: Ambiguous Query ---")
-    orchestrator.run_test_scenario("매출 보여줘", user_responses=["지난달 주문 데이터 보여줘"])
+    
+    async def main():
+        print("--- Running Scenario 1: Ambiguous Query ---")
+        await orchestrator.run_test_scenario("매출 보여줘", user_responses=["지난달 주문 데이터 보여줘"])
 
-    print("\n--- Running Scenario 2: Agent Request for Clarification ---")
-    orchestrator.run_test_scenario("최근 가입한 사람 정보", user_responses=["customers"])
+        print("\n--- Running Scenario 2: Agent Request for Clarification ---")
+        await orchestrator.run_test_scenario("최근 가입한 사람 정보", user_responses=["customers"])
+
+    asyncio.run(main())
