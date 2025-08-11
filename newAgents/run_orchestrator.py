@@ -30,7 +30,7 @@ async def main():
             logging.info(f"사용자 요청: \"{user_query}\"")
             
             # 에이전트의 process_request 메소드 호출
-            result = await agent.process_request(user_query)
+            result = await agent.process_request("최근 일주일간 회원가입한 총 유저의 수")
             
             # 결과 출력
             logging.info("최종 처리 결과:")

@@ -3,6 +3,7 @@ SQL Executor Agent - BigQuery를 통한 SQL 실행
 """
 
 from typing import Dict, Any, Optional
+import re
 from db.bigquery_client import bq_client
 
 
@@ -119,21 +120,23 @@ class SQLExecutorAgent:
                 validation["error"] = "빈 쿼리입니다."
                 return validation
             
-            # SELECT 문인지 확인
             query_upper = sql_query.strip().upper()
+            
+            # SELECT 문으로 시작하지 않으면 DML로 간주하고 차단
             if not query_upper.startswith("SELECT"):
                 validation["valid"] = False
                 validation["error"] = "SELECT 문만 실행 가능합니다."
                 return validation
             
-            # 위험한 키워드 체크
+            # 위험한 키워드가 독립적인 단어로 존재하는지 체크
             dangerous_keywords = [
                 "DROP", "DELETE", "UPDATE", "INSERT", "TRUNCATE", 
                 "ALTER", "CREATE", "REPLACE"
             ]
             
             for keyword in dangerous_keywords:
-                if keyword in query_upper:
+                # 정규식을 사용하여 단어 경계(\b)를 확인
+                if re.search(r"\b" + keyword + r"\b", query_upper):
                     validation["valid"] = False
                     validation["error"] = f"보안상 '{keyword}' 명령어는 사용할 수 없습니다."
                     return validation
