@@ -1,5 +1,5 @@
 """
-Schema Analyzer Agent - RAG와 LLM을 결합한 스키마 정보 검색 및 분석
+Schema Analyzer Agent - RAG와 LLM을 결합한 스키마 정보 검색, 분석 및 불확실성 정의
 """
 
 from typing import Dict, Any, List, Optional
@@ -15,17 +15,9 @@ from langchain.schema import HumanMessage, SystemMessage
 logger = logging.getLogger(__name__)
 
 class SchemaAnalyzerAgent:
-    """RAG와 LLM을 사용하여 관련 스키마 정보를 검색하고 분석하는 에이전트"""
+    """RAG와 LLM을 사용하여 관련 스키마를 분석하고 불확실성을 정의하는 에이전트"""
     
     def __init__(self, similarity_threshold: float = 0.3, max_tables: int = 7, model_name: str = "gpt-4-turbo"):
-        """
-        SchemaAnalyzer Agent 초기화
-        
-        Args:
-            similarity_threshold: 유사도 임계값
-            max_tables: 최대 검색할 테이블 수
-            model_name: 사용할 LLM 모델명
-        """
         print("🔍 SchemaAnalyzer Agent 초기화")
         self.similarity_threshold = similarity_threshold
         self.max_tables = max_tables
@@ -35,20 +27,14 @@ class SchemaAnalyzerAgent:
     
     async def analyze_query(self, user_query: str) -> Dict[str, Any]:
         """
-        사용자 쿼리를 분석하여 관련 스키마 정보 검색
-        
-        Args:
-            user_query: 사용자 자연어 쿼리
-            
-        Returns:
-            스키마 분석 결과
+        사용자 쿼리를 분석하여 관련 스키마 정보 검색 및 불확실성 정의
         """
         try:
             print(f"🔍 스키마 분석 시작: {user_query}")
             
             if not self._initialized:
                 if not await self._initialize_retriever():
-                    return {"success": False, "error": "Schema Retriever 초기화 실패", "schema_info": []}
+                    return {"success": False, "error": "Schema Retriever 초기화 실패"}
             
             relevant_tables = self._search_relevant_schemas(user_query)
             
@@ -56,32 +42,34 @@ class SchemaAnalyzerAgent:
                 print("⚠️ 관련 스키마 정보를 찾을 수 없습니다.")
                 return {"success": True, "schema_info": [], "message": "관련 스키마 정보를 찾을 수 없습니다."}
             
-            analysis_result = await self._perform_relevance_analysis(user_query, relevant_tables)
+            analysis_result = await self._perform_relevance_and_uncertainty_analysis(user_query, relevant_tables)
             
-            print(f"✅ 스키마 분석 완료: {len(analysis_result.get('schema_info', []))}개 테이블")
-            
+            if analysis_result.get("has_sufficient_info", True):
+                print(f"✅ 스키마 분석 완료: {len(analysis_result.get('schema_info', []))}개 테이블")
+            else:
+                print(f"⚠️ 정보 불충분: {len(analysis_result.get('uncertainties', []))}개 불확실성 발견")
+
             return analysis_result
             
         except Exception as e:
             error_msg = f"스키마 분석 중 오류: {str(e)}"
             print(f"❌ {error_msg}")
             logger.error(error_msg, exc_info=True)
-            return {"success": False, "error": error_msg, "schema_info": []}
+            return {"success": False, "error": error_msg}
 
-    async def _perform_relevance_analysis(self, user_query: str, tables: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """LLM을 이용한 관련성 및 의도 심층 분석"""
+    async def _perform_relevance_and_uncertainty_analysis(self, user_query: str, tables: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """LLM을 이용한 관련성, 의도, 불확실성 심층 분석"""
         
         schema_info_str = self._format_schema_info_for_llm(tables)
         
         system_prompt = f"""
-        당신은 자연어 쿼리와 데이터베이스 스키마를 분석하는 전문 AI Agent입니다.
-        사용자의 자연어 쿼리와 RAG로 추출된 스키마 정보를 분석하여 SQL 생성에 필요한 구조화된 컨텍스트를 만드세요.
+        당신은 자연어 쿼리와 데이터베이스 스키마를 분석하여 SQL 생성 컨텍스트를 만드는 전문 AI Agent입니다.
 
         **분석 프로세스:**
-        1. **쿼리 의도 파악 (Intent Analysis):** 사용자가 무엇을 원하는지 명확히 분석합니다. (예: COUNT, SUM, AVG, 특정 데이터 조회 등)
-        2. **필터 조건 식별 (Filter Identification):** 쿼리에 포함된 시간, 상태, 특정 값 등 모든 필터링 조건을 식별합니다. (예: 최근 7일, 특정 사용자 등)
-        3. **스키마 관련성 평가 (Schema Relevance Assessment):** 제공된 스키마 정보 중 사용자의 의도와 직접적으로 관련된 테이블과 **특정 컬럼들**을 식별합니다. 관련 없는 정보는 과감히 제외합니다.
-        4. **최종 컨텍스트 구성**: 분석 결과를 바탕으로, SQL 생성에 필요한 모든 정보를 포함한 최종 JSON을 반환합니다.
+        1. **쿼리 의도 및 필터 분석**: 사용자의 요청(Intent)과 필터링 조건(Filters)을 명확히 분석합니다.
+        2. **스키마 관련성 평가**: 제공된 스키마 정보 중 사용자의 의도와 직접적으로 관련된 테이블과 컬럼을 식별합니다.
+        3. **정보 충분성 판단**: 분석된 내용을 바탕으로, SQL 쿼리를 **오류 없이 정확하게** 생성하기에 정보가 충분한지 판단합니다.
+        4. **불확실성 정의**: 정보가 불충분하다고 판단되면, 무엇이 모호하고 어떤 정보가 더 필요한지 `uncertainties` 목록으로 구체적으로 정의합니다. 각 불확실성은 `DataExplorerAgent`가 해결할 수 있는 구체적인 질문 형태여야 합니다.
 
         **사용자 쿼리:** {user_query}
 
@@ -90,18 +78,32 @@ class SchemaAnalyzerAgent:
 
         **응답 형식 (JSON):**
         - 반드시 아래의 JSON 형식만으로 응답해야 합니다. 다른 설명은 절대 포함하지 마세요.
-        - `schema_info` 필드에는 최종적으로 관련 있다고 판단된 테이블의 정보만 포함합니다.
-        - `relevant_columns`에는 해당 테이블의 모든 컬럼이 아닌, **쿼리와 직접 관련된 컬럼만** 포함해야 합니다.
+        - 정보가 충분하면 `has_sufficient_info`를 `true`로, 불충분하면 `false`로 설정하세요.
+        - `has_sufficient_info`가 `false`일 경우에만 `uncertainties` 필드를 채워주세요.
 
         ```json
         {{
             "success": true,
+            "has_sufficient_info": true,
+            "uncertainties": [
+                {{
+                    "type": "column_value_check",
+                    "description": "users 테이블의 status 컬럼에 어떤 값들이 있는지 확인해야 합니다.",
+                    "target_table": "users",
+                    "target_column": "status"
+                }},
+                {{
+                    "type": "data_format_check",
+                    "description": "orders 테이블의 order_date 컬럼의 날짜 형식이 'YYYY-MM-DD'인지 확인이 필요합니다.",
+                    "target_table": "orders",
+                    "target_column": "order_date"
+                }}
+            ],
             "query_analysis": {{
                 "user_query": "{user_query}",
                 "intent": "사용자 의도(예: COUNT, SUM, SELECT)",
                 "filters": [
-                    {{"type": "date_range", "period": "last_7_days", "column": "적용할 날짜 컬럼명"}},
-                    {{"type": "value_filter", "column": "필터링할 컬럼명", "value": "필터링 값"}}
+                    {{"type": "date_range", "period": "last_7_days", "column": "적용할 날짜 컬럼명"}}
                 ],
                 "natural_language_description": "LLM이 이해한 사용자의 요청 내용 요약"
             }},
@@ -110,12 +112,11 @@ class SchemaAnalyzerAgent:
                     "table_name": "관련 테이블명",
                     "description": "테이블 설명",
                     "relevant_columns": [
-                        {{"name": "관련 컬럼명1", "type": "데이터타입", "description": "컬럼 설명"}},
-                        {{"name": "관련 컬럼명2", "type": "데이터타입", "description": "컬럼 설명"}}
+                        {{"name": "관련 컬럼명1", "type": "데이터타입", "description": "컬럼 설명"}}
                     ]
                 }}
             ],
-            "message": "Schema analysis completed successfully."
+            "message": "분석 요약 메시지"
         }}
         ```
         """
@@ -134,8 +135,6 @@ class SchemaAnalyzerAgent:
             return self._create_fallback_response(tables)
 
     def _format_schema_info_for_llm(self, tables: List[Dict[str, Any]]) -> str:
-        """LLM 분석을 위해 테이블 정보를 문자열로 포맷"""
-        # ... (이전과 동일, 변경 없음) ...
         formatted_info = []
         for i, table in enumerate(tables, 1):
             table_name = table.get("table_name", f"table_{i}")
@@ -147,37 +146,30 @@ class SchemaAnalyzerAgent:
                 field_text = f"     - {col.get('name')} ({col.get('type')}): {col.get('description')}"
                 schema_text += field_text + "\n"
             formatted_info.append(schema_text)
-        
         return "\n".join(formatted_info)
 
     def _parse_json_response(self, response_content: str) -> Optional[Dict]:
-        """LLM의 JSON 응답을 파싱"""
-        # ... (이전과 동일, 변경 없음) ...
         try:
             match = re.search(r"```json\n(.*?)\n```", response_content, re.DOTALL)
             if match:
                 content = match.group(1)
             else:
                 content = response_content
-            
             return json.loads(content.strip())
         except json.JSONDecodeError as e:
             logger.warning(f"JSON 파싱 실패: {str(e)}\n원본 내용: {response_content[:200]}...")
             return None
 
     def _create_fallback_response(self, tables: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """LLM 분석 실패 시, RAG 결과 기반의 기본 응답 생성"""
-        # ... (이전과 동일, 변경 없음) ...
         print("⚠️ LLM 분석 실패. RAG 검색 결과로 대체합니다.")
         return {
             "success": True,
+            "has_sufficient_info": True, # LLM 실패시 일단 충분한 것으로 간주
             "schema_info": self._process_schema_info(tables),
             "message": "LLM 분석에 실패하여, 검색된 스키마 정보를 기반으로 결과를 제공합니다."
         }
 
     async def _initialize_retriever(self) -> bool:
-        """Schema Retriever 초기화"""
-        # ... (이전과 동일, 변경 없음) ...
         try:
             print("🚀 Schema Retriever 초기화 중...")
             if self.schema_retriever.initialize():
@@ -190,8 +182,6 @@ class SchemaAnalyzerAgent:
             return False
     
     def _search_relevant_schemas(self, user_query: str) -> List[Dict]:
-        """관련 스키마 정보 검색"""
-        # ... (이전과 동일, 변경 없음) ...
         try:
             return self.schema_retriever.get_relevant_tables_with_threshold(
                 query=user_query,
@@ -203,8 +193,6 @@ class SchemaAnalyzerAgent:
             return []
     
     def _process_schema_info(self, schema_info: List[Dict]) -> List[Dict]:
-        """스키마 정보 후처리 및 정제"""
-        # ... (이전과 동일, 변경 없음) ...
         processed_schemas = []
         for table_info in schema_info:
             processed_table = {
