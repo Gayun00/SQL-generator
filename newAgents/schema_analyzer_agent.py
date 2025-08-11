@@ -1,115 +1,181 @@
+"""
+Schema Analyzer Agent - RAG를 통한 스키마 정보 검색 및 분석
+"""
+
 from typing import Dict, Any, List, Optional
-import random
+from rag.schema_retriever import schema_retriever
 
-# Mock Schema Retriever (실제 rag/schema_retriever.py의 역할을 시뮬레이션)
-class MockSchemaRetriever:
-    async def get_relevant_tables_with_threshold(self, query: str, similarity_threshold: float) -> List[Dict]:
-        print(f"[Schema Retriever] Searching for: '{query}' with threshold {similarity_threshold}")
-        query_lower = query.lower()
+
+class SchemaAnalyzerAgent:
+    """RAG를 사용하여 관련 스키마 정보를 검색하고 분석하는 에이전트"""
+    
+    def __init__(self, similarity_threshold: float = 0.5, max_tables: int = 5):
+        """
+        SchemaAnalyzer Agent 초기화
         
-        if "사용자" in query_lower or "고객" in query_lower or "user" in query_lower or "customers" in query_lower or "사람 정보" in query_lower:
-            return [
-                {"table_name": "users", "columns": ["id", "name", "email", "signup_date"], "relevance": 0.95},
-                {"table_name": "user_profiles", "columns": ["user_id", "address", "phone"], "relevance": 0.85}
-            ]
-        elif "주문" in query_lower or "order" in query_lower:
-            return [
-                {"table_name": "orders", "columns": ["order_id", "user_id", "amount", "order_date"], "relevance": 0.95},
-                {"table_name": "order_items", "columns": ["item_id", "order_id", "product_id", "quantity"], "relevance": 0.8}
-            ]
-        elif "매출" in query_lower or "sales" in query_lower:
-            return [
-                {"table_name": "sales_data", "columns": ["date", "revenue"], "relevance": 0.8},
-                {"table_name": "transactions", "columns": ["trans_id", "amount"], "relevance": 0.75},
-                {"table_name": "orders", "columns": ["order_id", "amount"], "relevance": 0.7}
-            ]
-        elif "알 수 없는 용어" in query_lower:
-            return []
-        else:
-            if random.random() < 0.3:
-                return []
+        Args:
+            similarity_threshold: 유사도 임계값
+            max_tables: 최대 검색할 테이블 수
+        """
+        print("🔍 SchemaAnalyzer Agent 초기화")
+        self.similarity_threshold = similarity_threshold
+        self.max_tables = max_tables
+        self.schema_retriever = schema_retriever
+        self._initialized = False
+    
+    async def analyze_query(self, user_query: str) -> Dict[str, Any]:
+        """
+        사용자 쿼리를 분석하여 관련 스키마 정보 검색
+        
+        Args:
+            user_query: 사용자 자연어 쿼리
+            
+        Returns:
+            스키마 분석 결과
+        """
+        try:
+            print(f"🔍 스키마 분석 시작: {user_query}")
+            
+            # Schema Retriever 초기화
+            if not self._initialized:
+                if not await self._initialize_retriever():
+                    return {
+                        "success": False,
+                        "error": "Schema Retriever 초기화 실패",
+                        "schema_info": []
+                    }
+            
+            # 관련 스키마 정보 검색
+            schema_info = self._search_relevant_schemas(user_query)
+            
+            if not schema_info:
+                print("⚠️ 관련 스키마 정보를 찾을 수 없습니다.")
+                return {
+                    "success": True,
+                    "schema_info": [],
+                    "message": "관련 스키마 정보를 찾을 수 없습니다. 다른 키워드로 시도해보세요.",
+                    "query": user_query
+                }
+            
+            # 스키마 정보 후처리
+            processed_schema = self._process_schema_info(schema_info)
+            
+            print(f"✅ 스키마 분석 완료: {len(processed_schema)}개 테이블")
+            
+            return {
+                "success": True,
+                "schema_info": processed_schema,
+                "message": f"{len(processed_schema)}개의 관련 테이블을 찾았습니다.",
+                "query": user_query,
+                "similarity_threshold": self.similarity_threshold
+            }
+            
+        except Exception as e:
+            error_msg = f"스키마 분석 중 오류: {str(e)}"
+            print(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "schema_info": []
+            }
+    
+    async def _initialize_retriever(self) -> bool:
+        """Schema Retriever 초기화"""
+        try:
+            print("🚀 Schema Retriever 초기화 중...")
+            if self.schema_retriever.initialize():
+                self._initialized = True
+                print("✅ Schema Retriever 초기화 완료")
+                return True
             else:
-                return [
-                    {"table_name": "products", "columns": ["id", "name"], "relevance": 0.5},
-                    {"table_name": "categories", "columns": ["id", "name"], "relevance": 0.4}
-                ]
-
-# Schema Analyzer Agent
-class SchemaAnalyzer:
-    def __init__(self):
-        self.session_contexts = {}
-        self.schema_retriever = MockSchemaRetriever()
-
-    def _get_context(self, session_id: str) -> Dict[str, Any]:
-        if session_id not in self.session_contexts:
-            self.session_contexts[session_id] = {
-                "last_query": None,
-                "last_tables_found": None,
-                "conversation_history": []
+                print("❌ Schema Retriever 초기화 실패")
+                return False
+        except Exception as e:
+            print(f"❌ Schema Retriever 초기화 오류: {str(e)}")
+            return False
+    
+    def _search_relevant_schemas(self, user_query: str) -> List[Dict]:
+        """관련 스키마 정보 검색"""
+        try:
+            # 임계값 기반 스키마 검색
+            relevant_tables = self.schema_retriever.get_relevant_tables_with_threshold(
+                query=user_query,
+                top_k=self.max_tables,
+                similarity_threshold=self.similarity_threshold
+            )
+            
+            return relevant_tables
+            
+        except Exception as e:
+            print(f"❌ 스키마 검색 중 오류: {str(e)}")
+            return []
+    
+    def _process_schema_info(self, schema_info: List[Dict]) -> List[Dict]:
+        """스키마 정보 후처리 및 정제"""
+        processed_schemas = []
+        
+        for table_info in schema_info:
+            # 기본 테이블 정보
+            processed_table = {
+                "table_name": table_info.get("table_name", ""),
+                "dataset": table_info.get("dataset", ""),
+                "table_id": table_info.get("table_id", ""),
+                "description": table_info.get("description", ""),
+                "columns": [],
+                "relevance_score": table_info.get("relevance_score", 0),
+                "matched_elements": table_info.get("matched_elements", [])
             }
-        return self.session_contexts[session_id]
-
-    def _is_sufficient_schema_info(self, tables: List[Dict], query: str) -> bool:
-        print("[Schema Analyzer] Evaluating schema sufficiency...")
-        if not tables:
-            return False
-
-        if len(tables) > 2 and ("매출" in query or "sales" in query):
-            print("[Schema Analyzer] Too many tables found for ambiguous query.")
-            return False
-
-        avg_relevance = sum(t["relevance"] for t in tables) / len(tables)
-        if avg_relevance < 0.7:
-            print(f"[Schema Analyzer] Average relevance ({avg_relevance:.2f}) is too low.")
-            return False
-
-        print("[Schema Analyzer] Schema info seems sufficient.")
-        return True
-
-    def _generate_clarification_question(self, partial_tables: List[Dict], query: str) -> str:
-        print("[Schema Analyzer] Generating clarification question...")
-        if not partial_tables:
-            return "어떤 데이터를 찾고 계신가요? 구체적인 테이블이나 데이터 종류를 알려주세요."
+            
+            # 컬럼 정보 처리
+            for column in table_info.get("columns", []):
+                processed_column = {
+                    "name": column.get("name", ""),
+                    "type": column.get("type", ""),
+                    "mode": column.get("mode", "NULLABLE"),
+                    "description": column.get("description", "")
+                }
+                processed_table["columns"].append(processed_column)
+            
+            processed_schemas.append(processed_table)
         
-        if len(partial_tables) > 2:
-            table_names = [t["table_name"] for t in partial_tables[:5]]
-            return f"' {query} '와(과) 관련된 여러 테이블을 찾았습니다. 다음 중 어떤 것이 가장 적합한가요?\n옵션: {', '.join(table_names)}"
+        return processed_schemas
+    
+    def get_schema_summary(self, schema_info: List[Dict]) -> str:
+        """스키마 정보를 요약 문자열로 변환"""
+        if not schema_info:
+            return "관련 스키마 정보가 없습니다."
         
-        return f"' {query} '에 대해 더 정확한 스키마 정보를 찾기 위해 추가 정보가 필요합니다. 어떤 종류의 데이터를 원하시나요?"
-
-    def _format_schema_info(self, tables: List[Dict]) -> List[Dict]:
-        formatted = []
-        for table in tables:
-            formatted.append({
-                "table_name": table["table_name"],
-                "columns": table["columns"]
-            })
-        return formatted
-
-    async def process(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        session_id = message["session_id"]
-        context = self._get_context(session_id)
-        context["conversation_history"].append(message)
-
-        query = message["content"]["query"]
+        summary_parts = []
+        summary_parts.append("🔍 발견된 관련 테이블:")
         
-        tables = await self.schema_retriever.get_relevant_tables_with_threshold(
-            query,
-            similarity_threshold=0.6
-        )
-        context["last_tables_found"] = tables
-        context["last_query"] = query
-
-        if self._is_sufficient_schema_info(tables, query):
-            return {
-                "status": "success",
-                "schema_info": self._format_schema_info(tables),
-                "next_agent": "sql_generator"
-            }
+        for i, table in enumerate(schema_info, 1):
+            table_name = table.get("table_name", "")
+            description = table.get("description", "")
+            column_count = len(table.get("columns", []))
+            
+            summary_parts.append(f"\n{i}. 📊 {table_name}")
+            if description:
+                summary_parts.append(f"   설명: {description}")
+            summary_parts.append(f"   컬럼: {column_count}개")
+            
+            # 주요 컬럼 표시 (최대 5개)
+            columns = table.get("columns", [])[:5]
+            if columns:
+                column_names = [col.get("name", "") for col in columns]
+                summary_parts.append(f"   주요 컬럼: {', '.join(column_names)}")
+                if len(table.get("columns", [])) > 5:
+                    summary_parts.append(f"   ... (총 {len(table.get('columns', []))}개)")
+        
+        return "\n".join(summary_parts)
+    
+    def adjust_similarity_threshold(self, new_threshold: float):
+        """유사도 임계값 조정"""
+        if 0.0 <= new_threshold <= 1.0:
+            self.similarity_threshold = new_threshold
+            print(f"🔧 유사도 임계값 변경: {new_threshold}")
         else:
-            question = self._generate_clarification_question(tables, query)
-            return {
-                "status": "needs_user_clarification", 
-                "question": question,
-                "next_agent": "user_communicator"
-            }
+            print("❌ 유사도 임계값은 0.0~1.0 사이여야 합니다.")
+
+
+# 전역 SchemaAnalyzer 인스턴스
+schema_analyzer_agent = SchemaAnalyzerAgent()
