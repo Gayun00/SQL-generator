@@ -2,9 +2,25 @@
 SQL Generator Agent - 자연어 쿼리를 SQL로 변환
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TypedDict
 import re
 import json
+from langgraph.graph import StateGraph, END
+from langgraph.graph.state import CompiledStateGraph
+from langchain_openai import ChatOpenAI
+from langchain.schema import HumanMessage, SystemMessage
+
+
+class SQLGeneratorInternalState(TypedDict):
+    """SQL Generator 내부 상태 관리"""
+    user_query: str
+    schema_info: List[Dict]
+    current_sql: str
+    query_analysis: Optional[Dict]
+    user_feedback: Optional[str]
+    user_choice: Optional[str]  # "execute" or "modify"
+    iteration_count: int
+    modification_history: List[Dict]
 
 
 class SQLGeneratorAgent:
@@ -13,20 +29,57 @@ class SQLGeneratorAgent:
     def __init__(self):
         """SQLGenerator Agent 초기화"""
         print("⚡ SQLGenerator Agent 초기화")
+        self.llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0.1,
+            max_tokens=2000
+        )
+        self.workflow: Optional[CompiledStateGraph] = None
+        self._build_workflow()
     
+    def _build_workflow(self):
+        """LangGraph 워크플로우 구성"""
+        graph = StateGraph(SQLGeneratorInternalState)
+        
+        # 노드 추가
+        graph.add_node("generate_sql_node", self._generate_sql_node)
+        graph.add_node("human_review_node", self._human_review_node)
+        graph.add_node("modify_sql_node", self._modify_sql_node)
+        
+        # 시작점 설정
+        graph.set_entry_point("generate_sql_node")
+        
+        # 엣지 설정
+        graph.add_edge("generate_sql_node", "human_review_node")
+        graph.add_edge("modify_sql_node", "human_review_node")
+        
+        # 조건부 엣지 설정
+        graph.add_conditional_edges(
+            "human_review_node",
+            self._route_user_decision,
+            {
+                "execute": END,
+                "modify": "modify_sql_node"
+            }
+        )
+        
+        # 컴파일
+        self.workflow = graph.compile()
+        print("🔧 SQL Generator LangGraph 워크플로우 구성 완료")
+
     async def generate_sql(self, user_query: str, schema_info: List[Dict]) -> Dict[str, Any]:
         """
-        사용자 쿼리와 스키마 정보를 기반으로 SQL 생성
+        Human-in-the-loop을 포함한 SQL 생성 (LangGraph 워크플로우 사용)
         
         Args:
             user_query: 사용자 자연어 쿼리
             schema_info: 관련 스키마 정보
             
         Returns:
-            SQL 생성 결과
+            최종 SQL 생성 결과
         """
         try:
-            print(f"⚡ SQL 생성 시작: {user_query}")
+            print(f"⚡ Human-in-the-Loop SQL 생성 시작: {user_query}")
             
             # 스키마 정보 검증
             if not schema_info:
@@ -36,13 +89,24 @@ class SQLGeneratorAgent:
                     "sql_query": ""
                 }
             
-            # 쿼리 분석
-            query_analysis = self._analyze_query(user_query)
+            # 초기 상태 설정
+            initial_state = SQLGeneratorInternalState(
+                user_query=user_query,
+                schema_info=schema_info,
+                current_sql="",
+                query_analysis=None,
+                user_feedback=None,
+                user_choice=None,
+                iteration_count=0,
+                modification_history=[]
+            )
             
-            # 스키마 기반 SQL 생성
-            sql_query = self._generate_sql_query(user_query, schema_info, query_analysis)
+            # LangGraph 워크플로우 실행
+            final_state = await self.workflow.ainvoke(initial_state)
             
-            if not sql_query:
+            # 최종 결과 검증
+            final_sql = final_state.get("current_sql", "")
+            if not final_sql or final_sql == "SELECT 1 as error_query":
                 return {
                     "success": False,
                     "error": "SQL 쿼리 생성에 실패했습니다.",
@@ -50,18 +114,18 @@ class SQLGeneratorAgent:
                 }
             
             # SQL 검증
-            validation_result = self._validate_sql(sql_query)
-            if not validation_result["valid"]:
-                print(f"⚠️ SQL 검증 경고: {validation_result['warning']}")
+            validation_result = self._validate_sql(final_sql)
             
-            print(f"✅ SQL 생성 완료")
+            print(f"✅ Human-in-the-Loop SQL 생성 완료!")
             
             return {
                 "success": True,
-                "sql_query": sql_query,
-                "query_analysis": query_analysis,
+                "sql_query": final_sql,
+                "query_analysis": final_state.get("query_analysis"),
                 "schema_info": schema_info,
                 "validation": validation_result,
+                "iteration_count": final_state.get("iteration_count", 0),
+                "modification_history": final_state.get("modification_history", []),
                 "message": "SQL 쿼리가 성공적으로 생성되었습니다."
             }
             
@@ -73,6 +137,196 @@ class SQLGeneratorAgent:
                 "error": error_msg,
                 "sql_query": ""
             }
+    
+    async def _generate_sql_node(self, state: SQLGeneratorInternalState) -> SQLGeneratorInternalState:
+        """SQL 생성 노드"""
+        try:
+            print(f"⚡ SQL 생성 중... (반복: {state['iteration_count'] + 1})")
+            
+            # 쿼리 분석 (첫 번째 반복에서만)
+            if state["iteration_count"] == 0:
+                state["query_analysis"] = self._analyze_query(state["user_query"])
+            
+            # SQL 생성
+            sql_query = self._generate_sql_query(
+                state["user_query"], 
+                state["schema_info"], 
+                state["query_analysis"]
+            )
+            
+            if not sql_query:
+                raise Exception("SQL 쿼리 생성에 실패했습니다.")
+            
+            state["current_sql"] = sql_query
+            state["iteration_count"] += 1
+            
+            print(f"✅ SQL 생성 완료")
+            return state
+            
+        except Exception as e:
+            print(f"❌ SQL 생성 오류: {str(e)}")
+            # 오류 발생 시 기본 쿼리라도 생성
+            state["current_sql"] = "SELECT 1 as error_query"
+            return state
+    
+    async def _human_review_node(self, state: SQLGeneratorInternalState) -> SQLGeneratorInternalState:
+        """사용자 검토 노드 - SQL 표시 및 사용자 선택 입력"""
+        try:
+            print("\n" + "="*60)
+            print("📋 생성된 SQL 쿼리:")
+            print("="*60)
+            print(state["current_sql"])
+            print("="*60)
+            
+            # 사용자 선택 입력
+            print("\n🤔 이 SQL을 실행하시겠습니까?")
+            print("1. 실행")
+            print("2. 수정")
+            
+            choice = input("선택 (1 또는 2): ").strip()
+            
+            if choice == "2":
+                print("\n✏️ 어떻게 수정하시겠습니까?")
+                feedback = input("수정 요청사항: ").strip()
+                
+                if not feedback:
+                    print("⚠️ 수정 요청사항이 없습니다. 실행으로 처리합니다.")
+                    choice = "1"
+                else:
+                    state["user_feedback"] = feedback
+                    # 수정 이력 저장
+                    state["modification_history"].append({
+                        "iteration": state["iteration_count"],
+                        "original_sql": state["current_sql"],
+                        "feedback": feedback
+                    })
+            
+            state["user_choice"] = "execute" if choice == "1" else "modify"
+            
+            print(f"👤 사용자 선택: {'실행' if choice == '1' else '수정'}")
+            return state
+            
+        except Exception as e:
+            print(f"❌ 사용자 입력 처리 오류: {str(e)}")
+            # 오류 시 기본적으로 실행 선택
+            state["user_choice"] = "execute"
+            return state
+    
+    def _route_user_decision(self, state: SQLGeneratorInternalState) -> str:
+        """사용자 선택에 따른 라우팅"""
+        return state.get("user_choice", "execute")
+    
+    async def _modify_sql_node(self, state: SQLGeneratorInternalState) -> SQLGeneratorInternalState:
+        """SQL 수정 노드 - LLM이 사용자 피드백을 기반으로 SQL 수정"""
+        try:
+            print(f"🔧 SQL 수정 중: {state['user_feedback']}")
+            
+            # LLM을 통한 SQL 수정
+            modified_sql = await self._modify_sql_with_llm(
+                current_sql=state["current_sql"],
+                user_feedback=state["user_feedback"],
+                original_query=state["user_query"],
+                schema_info=state["schema_info"]
+            )
+            
+            if modified_sql and modified_sql != state["current_sql"]:
+                state["current_sql"] = modified_sql
+                print("✅ SQL 수정 완료")
+            else:
+                print("⚠️ 수정사항이 없거나 수정 실패, 기존 SQL 유지")
+            
+            # 피드백 초기화
+            state["user_feedback"] = None
+            
+            return state
+            
+        except Exception as e:
+            print(f"❌ SQL 수정 오류: {str(e)}")
+            return state
+    
+    async def _modify_sql_with_llm(self, current_sql: str, user_feedback: str, original_query: str, schema_info: List[Dict]) -> str:
+        """LLM을 사용하여 사용자 피드백 기반 SQL 수정"""
+        try:
+            # 스키마 정보를 문자열로 변환
+            schema_context = self._format_schema_for_llm(schema_info)
+            
+            # LLM 프롬프트 구성
+            system_message = SystemMessage(content="""
+당신은 BigQuery SQL 전문가입니다. 사용자의 피드백을 바탕으로 기존 SQL 쿼리를 정확하게 수정해주세요.
+
+지시사항:
+1. 사용자의 수정 요청을 정확히 분석하고 반영하세요
+2. BigQuery 문법을 사용하세요 (테이블명은 백틱으로 감싸기)
+3. 수정된 완전한 SQL 쿼리만 반환하세요
+4. SQL 주석이나 설명은 포함하지 마세요
+5. SQL 문법이 올바른지 확인하세요
+""")
+            
+            human_message = HumanMessage(content=f"""
+**원본 사용자 요청:**
+{original_query}
+
+**현재 SQL 쿼리:**
+```sql
+{current_sql}
+```
+
+**사용자 수정 요청:**
+{user_feedback}
+
+**사용 가능한 스키마 정보:**
+{schema_context}
+
+위 정보를 바탕으로 사용자의 수정 요청을 반영한 SQL 쿼리를 작성해주세요.
+""")
+            
+            # LLM 호출
+            print("🤖 LLM을 통한 SQL 수정 진행 중...")
+            response = await self.llm.ainvoke([system_message, human_message])
+            
+            # 응답에서 SQL 추출
+            modified_sql = response.content.strip()
+            
+            # 코드 블록 제거 (```sql과 ``` 제거)
+            if modified_sql.startswith("```sql"):
+                modified_sql = modified_sql.replace("```sql", "").replace("```", "").strip()
+            elif modified_sql.startswith("```"):
+                modified_sql = modified_sql.replace("```", "").strip()
+            
+            print("✅ LLM SQL 수정 완료")
+            return modified_sql
+            
+        except Exception as e:
+            print(f"❌ LLM SQL 수정 중 오류: {str(e)}")
+            return current_sql
+    
+    def _format_schema_for_llm(self, schema_info: List[Dict]) -> str:
+        """스키마 정보를 LLM이 이해하기 쉬운 형태로 포맷팅"""
+        if not schema_info:
+            return "스키마 정보가 없습니다."
+        
+        schema_text = []
+        for table in schema_info:
+            table_name = table.get("table_name", "")
+            description = table.get("description", "")
+            columns = table.get("columns", [])
+            
+            schema_text.append(f"테이블: {table_name}")
+            if description:
+                schema_text.append(f"  설명: {description}")
+            
+            schema_text.append("  컬럼:")
+            for col in columns:
+                col_name = col.get("name", "")
+                col_type = col.get("type", "")
+                col_desc = col.get("description", "")
+                col_line = f"    - {col_name} ({col_type})"
+                if col_desc:
+                    col_line += f": {col_desc}"
+                schema_text.append(col_line)
+            schema_text.append("")
+        
+        return "\n".join(schema_text)
     
     def _analyze_query(self, user_query: str) -> Dict[str, Any]:
         """사용자 쿼리 분석"""
