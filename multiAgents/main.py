@@ -24,8 +24,8 @@ workflow.add_node("Supervisor", supervisor_node)
 # Supervisor에서 FINISH로만 연결
 workflow.add_conditional_edges(
     "Supervisor",
-    lambda x: x["next"],
-    {"FINISH": END, "Supervisor": "Supervisor"}  # 다음 단계가 있으면 다시 Supervisor 실행
+    lambda x: "FINISH" if x.get("next") == "FINISH" else "Supervisor",
+    {"FINISH": END, "Supervisor": "Supervisor"}
 )
 
 # 시작점 설정 - Supervisor에서 시작
