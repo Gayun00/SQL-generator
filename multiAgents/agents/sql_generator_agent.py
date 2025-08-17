@@ -11,7 +11,10 @@ llm = ChatOpenAI(model="gpt-4o")
 sql_agent = create_agent(
     llm,
     [generate_sql],
-    "You are a SQL generator. Your role is to create SQL queries based on user questions and schema info."
+    """You are a SQL generator agent. You have access to the generate_sql tool.
+When asked to create SQL queries, you MUST use the generate_sql tool.
+Always call the tool with the query request and schema information.
+Do not generate SQL queries directly without using the tool."""
 )
 
 # 노드 생성

@@ -11,7 +11,10 @@ llm = ChatOpenAI(model="gpt-4o")
 schema_agent = create_agent(
     llm,
     [get_schema_info],
-    "You are a schema analyzer. Your role is to get database schema information."
+    """You are a schema analyzer agent. You have access to the get_schema_info tool.
+When asked about database schemas or tables, you MUST use the get_schema_info tool.
+Always call the tool with appropriate parameters to retrieve schema information.
+Do not generate responses without using the tool."""
 )
 
 # 노드 생성
