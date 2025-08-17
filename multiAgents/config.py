@@ -30,3 +30,9 @@ DEFAULT_RECURSION_LIMIT = 5
 
 # 디버그 모드
 DEBUG = True
+
+# Human-in-the-Loop 설정
+HUMAN_IN_THE_LOOP = True
+
+# 테스트 모드 (자동으로 choice 1 선택)
+TEST_MODE = False

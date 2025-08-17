@@ -1,6 +1,7 @@
 from typing import Literal, TypedDict
 from langchain_openai import ChatOpenAI
-from multiAgents.config import AGENTS, LLM_MODEL, DEBUG
+from langchain_core.messages import HumanMessage
+from multiAgents.config import AGENTS, LLM_MODEL, DEBUG, HUMAN_IN_THE_LOOP
 
 # LLM 정의
 llm = ChatOpenAI(model=LLM_MODEL)
